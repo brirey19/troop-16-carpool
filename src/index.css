@@ -1,0 +1,237 @@
+/* src/App.css */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+:root {
+  --primary: #2563eb;
+  --primary-dark: #1e40af;
+  --success-bg: #f0fdf4;
+  --success-border: #86efac;
+  --success-text: #166534;
+  --warning-bg: #fefce8;
+  --warning-text: #854d0e;
+  --danger-bg: #fef2f2;
+  --danger-text: #991b1b;
+  --text-main: #111827;
+  --text-muted: #6b7280;
+  --border: #e5e7eb;
+  --bg-app: #f3f4f6;
+  --bg-card: #ffffff;
+}
+
+body {
+  font-family: 'Inter', sans-serif;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  margin: 0;
+  padding-bottom: 40px;
+}
+
+/* Header */
+.top-app-bar {
+  background-color: white;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.top-app-bar h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-main);
+}
+
+.container {
+  max-width: 600px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+/* Control Panel */
+.control-panel {
+  background: white;
+  padding: 1rem;
+  border-radius: 12px;
+  margin-bottom: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* ADMIN: Create Event Panel */
+.admin-create-panel {
+  background: white;
+  border: 1px solid var(--primary);
+  border-left: 4px solid var(--primary);
+  border-radius: 12px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+}
+.admin-create-panel h3 { margin: 0 0 1rem 0; font-size: 1rem; }
+.form-row { display: flex; gap: 10px; margin-bottom: 10px; }
+.form-row input { flex: 1; padding: 8px; border: 1px solid var(--border); border-radius: 6px; }
+
+/* CARD STYLING */
+.card {
+  background: var(--bg-card);
+  border-radius: 16px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  margin-bottom: 1.5rem;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  transition: all 0.2s ease;
+}
+
+/* --- STUB VIEW (Collapsed) --- */
+.stub-view {
+  padding: 1rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.stub-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.stub-info h2 {
+  margin: 0 0 0.25rem 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.stub-meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Wrapper for the two toggles in stub view */
+.stub-actions {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px; /* Space between the two toggles */
+}
+
+.stub-toggle {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.stub-toggle label {
+  font-size: 0.75rem; 
+  font-weight: 600; 
+  color: #666;
+  text-align: right;
+}
+
+.expand-trigger {
+  width: 100%;
+  text-align: center;
+  padding: 0.75rem;
+  background-color: #f9fafb;
+  border-top: 1px solid var(--border);
+  color: var(--primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.expand-trigger:hover {
+  background-color: #f3f4f6;
+}
+
+/* --- FULL VIEW SECTIONS --- */
+
+/* Header */
+.event-header {
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+  background-color: #fff;
+}
+.event-header h2 { margin: 0 0 0.5rem 0; font-size: 1.25rem; font-weight: 700; }
+
+.edit-input {
+  width: 100%; margin-bottom: 5px; padding: 5px; font-size: 1rem; border: 1px solid #93c5fd; border-radius: 4px;
+}
+.delete-btn {
+  position: absolute; top: 1.5rem; right: 1.5rem; background: var(--danger-bg); color: var(--danger-text); border: none; padding: 6px 12px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; cursor: pointer;
+}
+.meta-row { display: flex; gap: 16px; color: var(--text-muted); font-size: 0.875rem; margin-top: 8px; }
+.meta-item { display: flex; align-items: center; gap: 6px; }
+
+/* Attendee Section */
+.attendee-section { padding: 1rem 1.5rem; background-color: #f9fafb; border-bottom: 1px solid var(--border); }
+.attendee-title { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; }
+.attendee-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.attendee-chip { display: flex; align-items: center; background: white; border: 1px solid var(--border); border-radius: 20px; padding: 4px 10px; font-size: 0.85rem; font-weight: 500; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; margin-left: 6px; }
+.dot-success { background-color: #16a34a; }
+.dot-warn { background-color: #dc2626; animation: pulse 2s infinite; }
+@keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+
+/* Attendance Row (Full View) */
+.attendance-row { padding: 1.25rem 1.5rem; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); }
+.attendance-label { font-weight: 600; font-size: 1rem; color: var(--text-main); }
+
+/* Toggle Switch */
+.toggle-switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+.slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+input:checked + .slider { background-color: var(--primary); }
+input:focus + .slider { box-shadow: 0 0 1px var(--primary); }
+input:checked + .slider:before { transform: translateX(22px); }
+
+/* Drive Section */
+.drive-section { padding: 1.5rem; background-color: #ffffff; }
+.drive-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.drive-card { border: 1px solid var(--border); border-radius: 8px; padding: 1rem; cursor: pointer; background-color: white; transition: all 0.2s; }
+.drive-card:hover { background-color: #f9fafb; }
+.drive-card.selected { background-color: var(--success-bg); border-color: var(--success-border); }
+.drive-card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+.drive-label { font-weight: 600; font-size: 0.95rem; color: var(--text-main); }
+.drive-status-text { font-size: 0.8rem; font-weight: 500; color: var(--success-text); margin-top: 4px; }
+.checkbox-custom { width: 20px; height: 20px; border-radius: 4px; border: 2px solid #d1d5db; display: flex; align-items: center; justify-content: center; background: white; }
+.drive-card.selected .checkbox-custom { background-color: var(--primary); border-color: var(--primary); color: white; }
+.seats-row { border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem 1rem; display: flex; align-items: center; justify-content: space-between; margin-top: 1rem; }
+.seats-row input { width: 50px; text-align: center; border: 1px solid var(--border); padding: 6px; border-radius: 6px; font-weight: 600; font-size: 1rem; }
+
+/* Roster Section */
+.roster-section { background-color: #fafafa; padding: 1.5rem; border-top: 1px solid var(--border); }
+.roster-header { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; color: #9ca3af; text-transform: uppercase; margin-bottom: 1rem; }
+.roster-group { margin-bottom: 1.5rem; }
+.roster-tag { display: inline-block; background: #e5e7eb; color: #374151; font-size: 0.75rem; font-weight: 700; padding: 4px 8px; border-radius: 4px; margin-bottom: 10px; text-transform: uppercase; }
+.car-card { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
+.car-card.is-me { background-color: var(--success-bg); border-color: var(--success-border); }
+.car-info { display: flex; flex-direction: column; gap: 2px; }
+.driver-name { font-weight: 600; font-size: 0.95rem; display: flex; align-items: center; gap: 6px; }
+.passenger-text { font-size: 0.85rem; color: var(--text-muted); }
+.seat-badge { font-size: 0.75rem; border: 1px solid #e5e7eb; padding: 2px 8px; border-radius: 12px; background: white; color: var(--text-muted); }
+
+/* Components */
+button.primary-btn { background: var(--primary); color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 600; }
+button.primary-btn:hover { background: var(--primary-dark); }
+
+/* Utility */
+.icon { width: 18px; height: 18px; }
+.icon-success { width: 14px; height: 14px; stroke-width: 3; }

@@ -1,0 +1,578 @@
+// src/App.jsx
+import { useState, useEffect } from 'react';
+import './App.css';
+
+// *** API URL ***
+const API_URL = "https://script.google.com/macros/s/AKfycbyMVQuK3L7EmoZOY1lPlPp8o5LLtv0FjTPYXEsxWza_I-mR77oRN3_4rT2qRsbIAarr/exec"; 
+
+// --- ICONS ---
+const Icons = {
+  MapPin: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
+  Check: () => <svg className="icon-success" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
+  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
+  ChevronDown: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>,
+  ChevronUp: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>,
+  Alert: () => <svg className="icon" style={{color: '#854d0e'}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
+  Clock: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
+  Sync: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>,
+  Flag: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-8a2 2 0 012-2h14a2 2 0 012 2v8l-6-3-6 3-6-3-6 3zM3 21h18M5 5h14a2 2 0 012 2v3a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" /></svg>
+};
+
+// --- DATA ---
+const INITIAL_USERS = [
+  { id: 1, name: 'Block Family', kidName: 'Ethan', address: '559 Jackson Ave', lat: 41.8967, lng: -87.8176 },
+  { id: 2, name: 'Irey Family', kidName: 'David', address: '739 Monroe Ave', lat: 41.8996, lng: -87.8152 },
+  { id: 3, name: 'Grabowski Family', kidName: 'Kurt', address: '1311 Park Ave', lat: 41.9067, lng: -87.8185 },
+  { id: 4, name: 'Kyrias-Gann Family', kidName: 'James', address: '534 Ashland Ave', lat: 41.8954, lng: -87.8228 },
+  { id: 5, name: 'Murphy Family', kidName: 'Oliver', address: '718 Park Ave', lat: 41.8981, lng: -87.8182 },
+  { id: 6, name: 'Sandhu Family', kidName: 'Armaan', address: '45 Franklin Ave', lat: 41.8872, lng: -87.8239 },
+  { id: 7, name: 'Vroustouris Family', kidName: 'Harrison', address: '19 Gale Avenue', lat: 41.8864, lng: -87.8130 },
+];
+
+const MAX_DRIVERS = 2; 
+
+// --- HELPERS ---
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  if (!lat1 || !lon1 || !lat2 || !lon2) return 9999; 
+  const R = 6371; 
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c; 
+};
+
+const getPLCTime = (dateStr) => {
+  const d = new Date(dateStr);
+  d.setHours(d.getHours() - 1);
+  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+};
+
+const formatForInput = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  const pad = (n) => n < 10 ? '0' + n : n;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const generateId = () => Math.floor(Math.random() * 1000000000).toString();
+
+function App() {
+  const [currentUser, setCurrentUser] = useState(INITIAL_USERS[0]); 
+  const [isAdmin, setIsAdmin] = useState(false); 
+  const [events, setEvents] = useState([]); 
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const [seatConfig, setSeatConfig] = useState({});
+  const [expandedEvents, setExpandedEvents] = useState({});
+  const [drivingIntents, setDrivingIntents] = useState({});
+
+  const [newEventTitle, setNewEventTitle] = useState('');
+  const [newEventLocation, setNewEventLocation] = useState('');
+  const [newEventDate, setNewEventDate] = useState('');
+  const [newEventHasPLC, setNewEventHasPLC] = useState(false);
+
+  // --- API ---
+  useEffect(() => {
+    fetch(API_URL)
+      .then(res => res.json())
+      .then(data => { 
+        const sortedData = data.sort((a, b) => new Date(a.date) - new Date(b.date));
+        setEvents(sortedData); 
+        setLoading(false); 
+      })
+      .catch(err => { console.error("Error fetching", err); setLoading(false); });
+  }, []);
+
+  const saveToCloud = (newEvents) => {
+    const sortedEvents = [...newEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
+    setEvents(sortedEvents);
+    setSaving(true);
+    fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(sortedEvents) })
+    .then(() => setSaving(false))
+    .catch(() => { alert("Error saving"); setSaving(false); });
+  };
+
+  // --- LOGIC ---
+  const checkRosterUnlock = (eventDateStr) => {
+    const now = new Date();
+    const ctString = now.toLocaleString("en-US", { timeZone: "America/Chicago" });
+    const target = new Date(eventDateStr);
+    target.setHours(9, 0, 0, 0); 
+    return new Date(ctString) >= target;
+  };
+
+  const autoAssignByDistance = (event) => {
+    const directions = ['TO', 'FROM'];
+    let updatedDrivers = event.drivers.map(d => ({ ...d, passengers: [...d.passengers] }));
+    const attendeeIds = event.attendees.map(a => a.id || a);
+
+    directions.forEach(direction => {
+      const driversInDir = updatedDrivers.filter(d => d.direction === direction);
+      if (driversInDir.length === 0) return; 
+
+      const allKidsInDir = INITIAL_USERS.filter(u => attendeeIds.includes(u.id));
+
+      updatedDrivers = updatedDrivers.map(d => {
+        if (d.direction === direction) return { ...d, passengers: [] };
+        return d;
+      });
+
+      let kidsToAssign = allKidsInDir.filter(kid => {
+        const parentDriver = updatedDrivers.find(d => d.direction === direction && d.userId === kid.id);
+        if (parentDriver) {
+          parentDriver.passengers.push(kid.kidName);
+          return false; 
+        }
+        return true; 
+      });
+
+      const driversForPool = updatedDrivers.filter(d => d.direction === direction);
+      
+      if (driversForPool.length > 1) {
+        let edges = [];
+        kidsToAssign.forEach(kid => {
+          driversForPool.forEach(driver => {
+            const driverUser = INITIAL_USERS.find(u => u.id === driver.userId);
+            const dist = calculateDistance(kid.lat, kid.lng, driverUser.lat, driverUser.lng);
+            edges.push({ kid, driverUserId: driver.userId, distance: dist });
+          });
+        });
+        edges.sort((a, b) => a.distance - b.distance);
+        const assignedKidIds = new Set();
+        edges.forEach(edge => {
+          if (assignedKidIds.has(edge.kid.id)) return; 
+          const targetDriver = updatedDrivers.find(d => d.userId === edge.driverUserId && d.direction === direction);
+          if (targetDriver && targetDriver.passengers.length < targetDriver.seats) {
+            targetDriver.passengers.push(edge.kid.kidName);
+            assignedKidIds.add(edge.kid.id);
+          }
+        });
+      } else {
+        const singleDriver = driversForPool[0];
+        kidsToAssign.forEach(kid => {
+          if (singleDriver.passengers.length < singleDriver.seats) {
+            singleDriver.passengers.push(kid.kidName);
+          }
+        });
+      }
+    });
+    return { ...event, drivers: updatedDrivers };
+  };
+
+  const toggleExpand = (eventId, forceState) => {
+    setExpandedEvents(prev => ({ ...prev, [eventId]: forceState !== undefined ? forceState : !prev[eventId] }));
+  };
+
+  const getSeats = (eventId) => seatConfig[eventId] || 3;
+
+  const updateSeats = (eventId, val) => {
+    const newSeats = parseInt(val);
+    setSeatConfig({ ...seatConfig, [eventId]: newSeats });
+    const newEvents = events.map(event => {
+        if (event.id !== eventId) return event;
+        const evtWithNewSeats = {
+            ...event,
+            drivers: event.drivers.map(d => d.userId === currentUser.id ? { ...d, seats: newSeats } : d)
+        };
+        return autoAssignByDistance(evtWithNewSeats);
+    });
+    saveToCloud(newEvents);
+  };
+
+  const handleAddEvent = () => {
+    if (!newEventTitle || !newEventDate) return alert("Please fill in title and date");
+    const newEvent = {
+      id: generateId(),
+      title: newEventTitle,
+      date: newEventDate,
+      location: newEventLocation,
+      hasPLC: newEventHasPLC,
+      attendees: [],
+      drivers: [],
+    };
+    const newEvents = [...events, newEvent];
+    saveToCloud(newEvents);
+    setNewEventTitle(''); setNewEventDate(''); setNewEventLocation(''); setNewEventHasPLC(false);
+  };
+
+  const handleDeleteEvent = (eventId) => {
+    if (window.confirm("Delete event?")) {
+      saveToCloud(events.filter(e => e.id !== eventId));
+    }
+  };
+
+  const handleEditEvent = (eventId, field, value) => {
+    const newEvents = events.map(e => e.id === eventId ? { ...e, [field]: value } : e);
+    saveToCloud(newEvents); 
+  };
+
+  const toggleAttendance = (eventId, isAttending) => {
+    const newEvents = events.map(event => {
+      if (event.id !== eventId) return event;
+      
+      let updatedAttendees = [...event.attendees];
+      updatedAttendees = updatedAttendees.filter(a => (a.id || a) !== currentUser.id);
+
+      if (isAttending) {
+        const type = event.hasPLC ? "PLC" : "Regular";
+        updatedAttendees.push({ id: currentUser.id, type: type });
+      }
+      
+      const intermediateEvent = { ...event, attendees: updatedAttendees };
+      return autoAssignByDistance(intermediateEvent);
+    });
+    saveToCloud(newEvents);
+  };
+
+  const toggleDriving = (eventId, direction) => {
+    const newEvents = events.map(event => {
+      if (event.id !== eventId) return event;
+      
+      const alreadyDriving = event.drivers.find(d => d.userId === currentUser.id && d.direction === direction);
+      let updatedDrivers = [...event.drivers];
+
+      if (alreadyDriving) {
+        updatedDrivers = updatedDrivers.filter(d => d !== alreadyDriving);
+      } else {
+        const count = event.drivers.filter(d => d.direction === direction).length;
+        if (count >= MAX_DRIVERS) return event; 
+
+        const newDriver = {
+            userId: currentUser.id,
+            name: currentUser.name,
+            seats: getSeats(eventId),
+            direction: direction,
+            passengers: []
+        };
+        updatedDrivers.push(newDriver);
+      }
+
+      const intermediateEvent = { ...event, drivers: updatedDrivers };
+      return autoAssignByDistance(intermediateEvent);
+    });
+    saveToCloud(newEvents);
+  };
+
+  const cancelAllDrives = (eventId) => {
+    const newEvents = events.map(event => {
+        if (event.id !== eventId) return event;
+        const intermediateEvent = {
+            ...event,
+            drivers: event.drivers.filter(d => d.userId !== currentUser.id)
+        };
+        return autoAssignByDistance(intermediateEvent);
+    });
+    saveToCloud(newEvents);
+  };
+
+  // --- SUB-COMPONENTS ---
+  const DateBadge = ({ dateStr }) => {
+    const d = new Date(dateStr);
+    const month = d.toLocaleDateString('en-US', { month: 'short' });
+    const day = d.toLocaleDateString('en-US', { day: 'numeric' });
+    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    
+    return (
+        <div className="date-badge">
+            <span className="db-month">{month}</span>
+            <span className="db-day">{day}</span>
+            <span className="db-time">{time}</span>
+        </div>
+    );
+  };
+
+  // --- UI ---
+  return (
+    <div>
+      <header className="top-app-bar">
+        <h1>Troop 16 Scout Carpool</h1>
+        <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
+            {saving && <span style={{fontSize:'0.8rem', color:'#666'}}><Icons.Sync /> Saving...</span>}
+            <div style={{fontSize: '0.85rem', color:'#666'}}>{isAdmin ? "Admin" : "User"}</div>
+        </div>
+      </header>
+
+      <div className="container">
+        
+        {!loading && (
+        <>
+            {/* USER SELECTOR - MOVED TO TOP */}
+            <div className="user-selector">
+                <label style={{fontSize: '0.85rem', fontWeight: 600, color: '#666'}}>Select Family:</label>
+                <select 
+                    value={currentUser.id} 
+                    onChange={(e) => {
+                    setCurrentUser(INITIAL_USERS.find(u => u.id === parseInt(e.target.value)));
+                    setExpandedEvents({}); 
+                    }}
+                    style={{flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #ddd'}}
+                >
+                    {INITIAL_USERS.map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.kidName})</option>
+                    ))}
+                </select>
+            </div>
+
+            {isAdmin && (
+                <div className="admin-create-panel">
+                    <h3>+ Create New Event</h3>
+                    <div className="form-row">
+                        <input type="text" placeholder="Event Title" value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} />
+                        <input type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} />
+                    </div>
+                    <div className="form-row">
+                        <input type="text" placeholder="Location" value={newEventLocation} onChange={e => setNewEventLocation(e.target.value)} />
+                        <div style={{display:'flex', alignItems:'center', gap:'5px', padding:'0 10px'}}>
+                            <input type="checkbox" checked={newEventHasPLC} onChange={e => setNewEventHasPLC(e.target.checked)} />
+                            <label style={{fontSize:'0.85rem'}}>Has PLC?</label>
+                        </div>
+                        <button className="primary-btn" onClick={handleAddEvent}>Create</button>
+                    </div>
+                </div>
+            )}
+            
+            {events.map(event => {
+                const isExpanded = expandedEvents[event.id];
+                
+                const myAttendance = event.attendees.find(a => (a.id || a) === currentUser.id);
+                const isMyKidAttending = !!myAttendance;
+
+                const drivingTo = event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO');
+                const drivingFrom = event.drivers.find(d => d.userId === currentUser.id && d.direction === 'FROM');
+                
+                const intentKey = `${event.id}_${currentUser.id}`;
+                const isDrivingReal = drivingTo || drivingFrom;
+                const isDrivingIntent = drivingIntents[intentKey];
+                const toggleState = !!isDrivingReal || !!isDrivingIntent;
+                const showMissingInfoWarning = toggleState && !isDrivingReal;
+
+                const toDriverCount = event.drivers.filter(d => d.direction === 'TO').length;
+                const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
+                const canDriveTo = drivingTo || toDriverCount < MAX_DRIVERS;
+                const canDriveFrom = drivingFrom || fromDriverCount < MAX_DRIVERS;
+                const isRosterUnlocked = checkRosterUnlock(event.date);
+                const isRosterVisible = isRosterUnlocked || isAdmin;
+
+                const attendingList = INITIAL_USERS.filter(u => event.attendees.map(a => a.id || a).includes(u.id));
+                const driversToList = event.drivers.filter(d => d.direction === 'TO').map(d => d.name);
+                const driversFromList = event.drivers.filter(d => d.direction === 'FROM').map(d => d.name);
+
+                return (
+                <div key={event.id} className="card">
+                    
+                    {/* HEADER */}
+                    <div className="event-header">
+                        
+                        {!isAdmin && <DateBadge dateStr={event.date} />}
+
+                        <div className="header-info">
+                            {isAdmin ? (
+                                <>
+                                    <button className="delete-btn" onClick={() => handleDeleteEvent(event.id)}>DELETE</button>
+                                    <input className="edit-input" type="text" value={event.title} onChange={(e) => handleEditEvent(event.id, 'title', e.target.value)} />
+                                    <div className="meta-row">
+                                        <input 
+                                            className="edit-input" 
+                                            type="datetime-local" 
+                                            value={formatForInput(event.date)} 
+                                            onChange={(e) => handleEditEvent(event.id, 'date', e.target.value)} 
+                                        />
+                                    </div>
+                                </>
+                            ) : (
+                                <>
+                                    <h2>{event.title}</h2>
+                                    <div className="meta-row">
+                                        <div className="meta-item">
+                                            <Icons.MapPin />
+                                            {event.location || 'No Location'}
+                                        </div>
+                                    </div>
+                                    {event.hasPLC && (
+                                        <div className="meta-row" style={{color:'#d97706', fontWeight:600}}>
+                                            <Icons.Flag /> PLC Meeting @ {getPLCTime(event.date)}
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                            
+                            <div className="stub-summary">
+                                <div className="summary-item"><span className="summary-badge kids">{attendingList.length} Going</span></div>
+                                <div className="summary-item">
+                                    <span className="summary-badge to">To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}
+                                </div>
+                                <div className="summary-item">
+                                    <span className="summary-badge from">From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}
+                                </div>
+                            </div>
+                        </div>
+
+                        {!isAdmin && (
+                            <div className="header-actions">
+                                <div className="action-toggle-group">
+                                    <label>
+                                        {currentUser.kidName} Going?
+                                        {event.hasPLC && <div style={{fontSize:'0.6rem', color:'#d97706', fontWeight:400}}>(PLC)</div>}
+                                    </label>
+                                    <label className="toggle-switch">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={isMyKidAttending} 
+                                            onChange={(e) => toggleAttendance(event.id, e.target.checked)}
+                                        />
+                                        <span className="slider"></span>
+                                    </label>
+                                </div>
+
+                                <div className="action-toggle-group">
+                                    <label>I can drive</label>
+                                    <label className="toggle-switch">
+                                        <input 
+                                            type="checkbox" 
+                                            checked={toggleState} 
+                                            onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setDrivingIntents(prev => ({...prev, [intentKey]: true}));
+                                                    toggleExpand(event.id, true);
+                                                } else {
+                                                    if (isDrivingReal) {
+                                                        if(window.confirm("Stop driving?")) {
+                                                            cancelAllDrives(event.id);
+                                                            setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                        }
+                                                    } else {
+                                                        setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                    }
+                                                }
+                                            }}
+                                        />
+                                        <span className="slider"></span>
+                                    </label>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {isExpanded && (
+                    <div className="card-body">
+                        
+                        <div className="attendee-section">
+                            <div className="attendee-title">Who is going?</div>
+                            <div className="attendee-grid">
+                                {attendingList.map(u => {
+                                    const hasRideTo = event.drivers.some(d => d.direction === 'TO' && d.passengers.includes(u.kidName));
+                                    const hasRideFrom = event.drivers.some(d => d.direction === 'FROM' && d.passengers.includes(u.kidName));
+
+                                    return (
+                                        <div key={u.id} className="attendee-chip">
+                                            {u.kidName}
+                                            {isRosterVisible && (
+                                                <div className="meta-item" style={{marginLeft: '8px', fontSize:'0.75rem', color: '#666'}}>
+                                                    To <div className={`status-dot ${hasRideTo ? 'dot-success' : 'dot-warn'}`}></div>
+                                                    | From <div className={`status-dot ${hasRideFrom ? 'dot-success' : 'dot-warn'}`}></div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        {!isAdmin && (
+                        <div className="drive-section">
+                            {showMissingInfoWarning && (
+                                <div style={{backgroundColor: '#fefce8', border: '1px solid #fde047', color: '#854d0e', padding: '10px', borderRadius: '6px', marginBottom: '15px', fontSize: '0.9rem', display: 'flex', gap:'8px', alignItems:'center'}}>
+                                    <Icons.Alert /> Please select if you are driving To, From, or Both:
+                                </div>
+                            )}
+
+                            <div className="drive-grid">
+                                <div className={`drive-card ${drivingTo ? 'selected' : ''} ${!canDriveTo ? 'disabled' : ''}`} onClick={() => canDriveTo && toggleDriving(event.id, 'TO')}>
+                                    <div className="drive-card-header">
+                                        <span className="drive-label">
+                                            → Driving TO? 
+                                            {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}
+                                        </span>
+                                        <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
+                                    </div>
+                                    {drivingTo && <div className="drive-status-text">You are driving.</div>}
+                                </div>
+
+                                <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
+                                    <div className="drive-card-header">
+                                        <span className="drive-label">← Driving FROM?</span>
+                                        <div className="checkbox-custom">{drivingFrom && <Icons.Check />}</div>
+                                    </div>
+                                    {drivingFrom && <div className="drive-status-text">You are driving.</div>}
+                                </div>
+                            </div>
+                            <div className="seats-row">
+                                <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}>
+                                    <Icons.CarSide /> Available Seats (Other Kids):
+                                </div>
+                                <input type="number" min="1" max="8" value={getSeats(event.id)} onChange={(e) => updateSeats(event.id, e.target.value)} />
+                            </div>
+                        </div>
+                        )}
+
+                        <div className="roster-section">
+                            <div className="roster-header">CARPOOL ROSTER</div>
+                            {!isRosterVisible ? (
+                                <div className="roster-pending">
+                                    <div style={{display:'flex', justifyContent:'center', marginBottom:'10px'}}><Icons.Clock /></div>
+                                    <strong>Rosters Pending</strong>
+                                    <div style={{marginTop:'4px'}}>Assignments available at 9:00 AM on event day.</div>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="roster-group"><div className="roster-tag">TO EVENT</div>
+                                        {event.drivers.filter(d => d.direction === 'TO').map(d => (
+                                            <div key={d.userId} className={`car-card ${d.userId === currentUser.id ? 'is-me' : ''}`}>
+                                                <div className="car-info">
+                                                    <div className="driver-name">🚗 {d.name}</div>
+                                                    <div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="roster-group"><div className="roster-tag">FROM EVENT</div>
+                                        {event.drivers.filter(d => d.direction === 'FROM').map(d => (
+                                            <div key={d.userId} className={`car-card ${d.userId === currentUser.id ? 'is-me' : ''}`}>
+                                                <div className="car-info">
+                                                    <div className="driver-name">🚗 {d.name}</div>
+                                                    <div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                    </div>
+                    )}
+
+                    <div className="expand-trigger" onClick={() => toggleExpand(event.id)}>
+                        {isExpanded ? <>Hide Details <Icons.ChevronUp /></> : <>View Details <Icons.ChevronDown /></>}
+                    </div>
+                </div>
+                );
+            })}
+        </>
+        )}
+
+        {/* ADMIN FOOTER - MOVED TO BOTTOM */}
+        <div className="admin-footer">
+            <div style={{display:'flex', alignItems:'center', gap:'5px', fontSize:'0.85rem'}}>
+                <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
+                Admin Mode
+            </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+export default App;
