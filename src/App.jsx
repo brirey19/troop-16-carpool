@@ -9,6 +9,7 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyMVQuK3L7EmoZOY1lPlPp8
 const Icons = {
   MapPin: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
   Check: () => <svg className="icon-success" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
+  X: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>,
   CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
   ChevronDown: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>,
   ChevronUp: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>,
@@ -57,7 +58,6 @@ const formatForInput = (dateStr) => {
 
 const generateId = () => Math.floor(Math.random() * 1000000000).toString();
 
-// Moved outside component to prevent ReferenceError
 const checkRosterUnlock = (eventDateStr) => {
   const now = new Date();
   const ctString = now.toLocaleString("en-US", { timeZone: "America/Chicago" });
@@ -66,7 +66,7 @@ const checkRosterUnlock = (eventDateStr) => {
   return new Date(ctString) >= target;
 };
 
-// --- DEBUG: COMPARE HELPER ---
+// --- DIFF REPORT ---
 const generateDiffReport = (localList, cloudList) => {
   let diffs = [];
   
@@ -87,8 +87,8 @@ const generateDiffReport = (localList, cloudList) => {
       diffs.push(`Event "${cEvt.title}": Drivers changed.`);
     }
 
-    const lAtt = (lEvt.attendees || []).map(a => a.id || a).sort().join(',');
-    const cAtt = (cEvt.attendees || []).map(a => a.id || a).sort().join(',');
+    const lAtt = (lEvt.attendees || []).map(a => (a.id || a) + a.status).sort().join(',');
+    const cAtt = (cEvt.attendees || []).map(a => (a.id || a) + a.status).sort().join(',');
     if (lAtt !== cAtt) {
       diffs.push(`Event "${cEvt.title}": Attendees changed.`);
     }
@@ -126,22 +126,23 @@ function App() {
 
   // --- LOGIC: ASSIGNMENT ---
   const autoAssignByDistance = useCallback((event) => {
-    // GUARD: If event is missing, return safely
     if (!event) return event;
     const currentDrivers = event.drivers || [];
     const currentAttendees = event.attendees || [];
 
     const directions = ['TO', 'FROM'];
-    
-    // Reset passengers
     let updatedDrivers = currentDrivers.map(d => ({ ...d, passengers: [] }));
-    const attendeeIds = currentAttendees.map(a => a.id || a);
+    
+    // Filter: Only care about people who are "Attending" for the carpool
+    const attendingIds = currentAttendees
+      .filter(a => a.status === 'Attending')
+      .map(a => a.id || a);
 
     directions.forEach(direction => {
       const driversInDir = updatedDrivers.filter(d => d.direction === direction);
       if (driversInDir.length === 0) return; 
 
-      const allKidsInDir = INITIAL_USERS.filter(u => attendeeIds.includes(u.id));
+      const allKidsInDir = INITIAL_USERS.filter(u => attendingIds.includes(u.id));
 
       let kidsToAssign = allKidsInDir.filter(kid => {
         const parentDriver = updatedDrivers.find(d => d.direction === direction && d.userId === kid.id);
@@ -191,19 +192,16 @@ function App() {
   }, [seatConfig]);
 
   // --- API & POLLING ---
-  
   const fetchEvents = async () => {
     try {
       const res = await fetch(API_URL);
       const data = await res.json();
       
-      // GUARD: Ensure Array
       if (!Array.isArray(data)) {
         console.error("API did not return an array:", data);
         return null;
       }
 
-      // Strict Filter & ID String Force
       const validEvents = data
         .filter(e => e.id && String(e.id).trim() !== "")
         .map(e => ({ ...e, id: String(e.id) }));
@@ -218,7 +216,6 @@ function App() {
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
-        // Hydrate initially so "Current" matches future "Polled" structure
         const hydrated = data.map(e => autoAssignByDistance(e));
         setEvents(hydrated);
         setLoading(false);
@@ -226,7 +223,6 @@ function App() {
     });
   }, [autoAssignByDistance]); 
 
-  // POLLING INTERVAL
   useEffect(() => {
     const interval = setInterval(() => {
       if (saving || loading) return; 
@@ -250,7 +246,6 @@ function App() {
   }, [events, saving, loading, autoAssignByDistance]);
 
   const applyUpdate = () => {
-    // UPDATED: No alert, apply immediately
     if (incomingEvents) {
       setEvents(incomingEvents);
       setUpdateAvailable(false);
@@ -321,17 +316,19 @@ function App() {
     saveToCloud(newEvents); 
   };
 
-  const toggleAttendance = (eventId, isAttending) => {
+  // UPDATED: Handle 3-State Logic
+  const toggleAttendance = (eventId, newStatus) => {
     if (!currentUser) return; 
     const newEvents = events.map(event => {
       if (event.id !== eventId) return event;
       
       let updatedAttendees = [...event.attendees];
+      // Remove existing status for this user
       updatedAttendees = updatedAttendees.filter(a => (a.id || a) !== currentUser.id);
 
-      if (isAttending) {
-        const type = event.hasPLC ? "PLC" : "Regular";
-        updatedAttendees.push({ id: currentUser.id, type: type });
+      // If newStatus is valid (Attending/Not Attending), add it. If null, leave it removed.
+      if (newStatus) {
+        updatedAttendees.push({ id: currentUser.id, status: newStatus });
       }
       
       return autoAssignByDistance({ ...event, attendees: updatedAttendees });
@@ -453,8 +450,9 @@ function App() {
             {events.map(event => {
                 const isExpanded = expandedEvents[event.id];
                 
+                // USER STATUS
                 const myAttendance = currentUser ? event.attendees.find(a => (a.id || a) === currentUser.id) : null;
-                const isMyKidAttending = !!myAttendance;
+                const status = myAttendance ? myAttendance.status : null; // "Attending", "Not Attending", or null
 
                 const drivingTo = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO') : null;
                 const drivingFrom = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'FROM') : null;
@@ -465,17 +463,19 @@ function App() {
                 const toggleState = !!isDrivingReal || !!isDrivingIntent;
                 const showMissingInfoWarning = toggleState && !isDrivingReal;
 
-                const toDriverCount = event.drivers.filter(d => d.direction === 'TO').length;
-                const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
-                const canDriveTo = drivingTo || toDriverCount < MAX_DRIVERS;
-                const canDriveFrom = drivingFrom || fromDriverCount < MAX_DRIVERS;
+                // SUMMARY COUNTS
+                const attendingCount = event.attendees.filter(a => a.status === 'Attending').length;
+                const notAttendingCount = event.attendees.filter(a => a.status === 'Not Attending').length;
+
+                const driversToList = event.drivers.filter(d => d.direction === 'TO').map(d => d.name);
+                const driversFromList = event.drivers.filter(d => d.direction === 'FROM').map(d => d.name);
                 
                 const isRosterUnlocked = checkRosterUnlock(event.date);
                 const isRosterVisible = isRosterUnlocked || isAdmin;
 
-                const attendingList = INITIAL_USERS.filter(u => event.attendees.map(a => a.id || a).includes(u.id));
-                const driversToList = event.drivers.filter(d => d.direction === 'TO').map(d => d.name);
-                const driversFromList = event.drivers.filter(d => d.direction === 'FROM').map(d => d.name);
+                const attendingList = INITIAL_USERS.filter(u => 
+                    event.attendees.some(a => (a.id || a) === u.id && a.status === 'Attending')
+                );
 
                 return (
                 <div key={event.id} className="card">
@@ -501,7 +501,10 @@ function App() {
                             )}
                             
                             <div className="stub-summary">
-                                <div className="summary-item"><span className="summary-badge kids">{attendingList.length} Going</span></div>
+                                <div className="summary-item">
+                                    <span className="summary-badge kids">{attendingCount} Going</span>
+                                    {notAttendingCount > 0 && <span className="summary-badge missing">{notAttendingCount} Not Going</span>}
+                                </div>
                                 <div className="summary-item"><span className="summary-badge to">To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
                                 <div className="summary-item"><span className="summary-badge from">From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
                             </div>
@@ -513,10 +516,20 @@ function App() {
                                 <>
                                     <div className="action-toggle-group">
                                         <label>{currentUser.kidName} Going? {event.hasPLC && <span style={{color:'#d97706'}}>(PLC)</span>}</label>
-                                        <label className="toggle-switch">
-                                            <input type="checkbox" checked={isMyKidAttending} onChange={(e) => toggleAttendance(event.id, e.target.checked)} />
-                                            <span className="slider"></span>
-                                        </label>
+                                        <div className="att-btn-group">
+                                            <button 
+                                                className={`att-btn ${status === 'Attending' ? 'active-green' : ''}`}
+                                                onClick={() => toggleAttendance(event.id, status === 'Attending' ? null : 'Attending')}
+                                            >
+                                                <Icons.Check />
+                                            </button>
+                                            <button 
+                                                className={`att-btn ${status === 'Not Attending' ? 'active-red' : ''}`}
+                                                onClick={() => toggleAttendance(event.id, status === 'Not Attending' ? null : 'Not Attending')}
+                                            >
+                                                <Icons.X />
+                                            </button>
+                                        </div>
                                     </div>
                                     <div className="action-toggle-group">
                                         <label>I can drive</label>
