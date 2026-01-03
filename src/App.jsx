@@ -58,11 +58,18 @@ const formatForInput = (dateStr) => {
 const generateId = () => Math.floor(Math.random() * 1000000000).toString();
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(INITIAL_USERS[0]); 
+  // START AS NULL (No User Selected)
+  const [currentUser, setCurrentUser] = useState(null); 
   const [isAdmin, setIsAdmin] = useState(false); 
+  
+  // State
   const [events, setEvents] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Polling State
+  const [incomingEvents, setIncomingEvents] = useState(null);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
 
   const [seatConfig, setSeatConfig] = useState({});
   const [expandedEvents, setExpandedEvents] = useState({});
@@ -73,26 +80,59 @@ function App() {
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventHasPLC, setNewEventHasPLC] = useState(false);
 
-  // --- API ---
+  // --- API & POLLING ---
+  const fetchEvents = async () => {
+    try {
+      const res = await fetch(API_URL);
+      const data = await res.json();
+      const validEvents = data.filter(e => e.id && String(e.id).trim() !== "");
+      return validEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+    } catch (err) {
+      console.error("Error fetching", err);
+      return null;
+    }
+  };
+
   useEffect(() => {
-    fetch(API_URL)
-      .then(res => res.json())
-      .then(data => { 
-        // FILTER AND SORT
-        // 1. Filter: Ensure ID exists and is not empty
-        const validEvents = data.filter(e => e.id && String(e.id).trim() !== "");
-        // 2. Sort: Chronological
-        const sortedData = validEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
-        
-        setEvents(sortedData); 
-        setLoading(false); 
-      })
-      .catch(err => { console.error("Error fetching", err); setLoading(false); });
+    fetchEvents().then(data => {
+      if (data) {
+        setEvents(data);
+        setLoading(false);
+      }
+    });
   }, []);
 
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (saving || loading) return; 
+
+      fetchEvents().then(newData => {
+        if (!newData) return;
+        const currentStr = JSON.stringify(events);
+        const newStr = JSON.stringify(newData);
+        if (currentStr !== newStr) {
+          setIncomingEvents(newData);
+          setUpdateAvailable(true);
+        }
+      });
+    }, 15000); 
+
+    return () => clearInterval(interval);
+  }, [events, saving, loading]);
+
+  const applyUpdate = () => {
+    if (incomingEvents) {
+      setEvents(incomingEvents);
+      setUpdateAvailable(false);
+      setIncomingEvents(null);
+    }
+  };
+
   const saveToCloud = (newEvents) => {
-    const sortedEvents = [...newEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const validEvents = newEvents.filter(e => e.id && String(e.id).trim() !== "");
+    const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
     setEvents(sortedEvents);
+    setUpdateAvailable(false);
     setSaving(true);
     fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(sortedEvents) })
     .then(() => setSaving(false))
@@ -173,6 +213,7 @@ function App() {
   const getSeats = (eventId) => seatConfig[eventId] || 3;
 
   const updateSeats = (eventId, val) => {
+    if (!currentUser) return; // Guard
     const newSeats = parseInt(val);
     setSeatConfig({ ...seatConfig, [eventId]: newSeats });
     const newEvents = events.map(event => {
@@ -214,6 +255,7 @@ function App() {
   };
 
   const toggleAttendance = (eventId, isAttending) => {
+    if (!currentUser) return; // Guard
     const newEvents = events.map(event => {
       if (event.id !== eventId) return event;
       
@@ -232,6 +274,7 @@ function App() {
   };
 
   const toggleDriving = (eventId, direction) => {
+    if (!currentUser) return; // Guard
     const newEvents = events.map(event => {
       if (event.id !== eventId) return event;
       
@@ -261,6 +304,7 @@ function App() {
   };
 
   const cancelAllDrives = (eventId) => {
+    if (!currentUser) return; // Guard
     const newEvents = events.map(event => {
         if (event.id !== eventId) return event;
         const intermediateEvent = {
@@ -295,6 +339,13 @@ function App() {
         <h1>Troop 16 Scout Carpool</h1>
         <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
             {saving && <span style={{fontSize:'0.8rem', color:'#666'}}><Icons.Sync /> Saving...</span>}
+            
+            {/* UPDATE BUTTON */}
+            {updateAvailable && (
+              <button className="update-btn" onClick={applyUpdate}>
+                <Icons.Sync /> Update Available
+              </button>
+            )}
         </div>
       </header>
 
@@ -306,13 +357,15 @@ function App() {
             <div className="user-selector">
                 <label style={{fontSize: '0.85rem', fontWeight: 600, color: '#666'}}>Select Family:</label>
                 <select 
-                    value={currentUser.id} 
+                    value={currentUser ? currentUser.id : ""} // Handle Null Value
                     onChange={(e) => {
-                    setCurrentUser(INITIAL_USERS.find(u => u.id === parseInt(e.target.value)));
-                    setExpandedEvents({}); 
+                      if (e.target.value === "") return;
+                      setCurrentUser(INITIAL_USERS.find(u => u.id === parseInt(e.target.value)));
+                      setExpandedEvents({}); 
                     }}
                     style={{flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #ddd'}}
                 >
+                    <option value="" disabled>Select your family...</option>
                     {INITIAL_USERS.map(u => (
                     <option key={u.id} value={u.id}>{u.name} ({u.kidName})</option>
                     ))}
@@ -340,13 +393,14 @@ function App() {
             {events.map(event => {
                 const isExpanded = expandedEvents[event.id];
                 
-                const myAttendance = event.attendees.find(a => (a.id || a) === currentUser.id);
+                // Safe checks for currentUser (might be null)
+                const myAttendance = currentUser ? event.attendees.find(a => (a.id || a) === currentUser.id) : null;
                 const isMyKidAttending = !!myAttendance;
 
-                const drivingTo = event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO');
-                const drivingFrom = event.drivers.find(d => d.userId === currentUser.id && d.direction === 'FROM');
+                const drivingTo = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO') : null;
+                const drivingFrom = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'FROM') : null;
                 
-                const intentKey = `${event.id}_${currentUser.id}`;
+                const intentKey = currentUser ? `${event.id}_${currentUser.id}` : null;
                 const isDrivingReal = drivingTo || drivingFrom;
                 const isDrivingIntent = drivingIntents[intentKey];
                 const toggleState = !!isDrivingReal || !!isDrivingIntent;
@@ -415,46 +469,51 @@ function App() {
 
                         {!isAdmin && (
                             <div className="header-actions">
-                                <div className="action-toggle-group">
-                                    <label>
-                                        {currentUser.kidName} Going?
-                                        {event.hasPLC && <div style={{fontSize:'0.6rem', color:'#d97706', fontWeight:400}}>(PLC)</div>}
-                                    </label>
-                                    <label className="toggle-switch">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={isMyKidAttending} 
-                                            onChange={(e) => toggleAttendance(event.id, e.target.checked)}
-                                        />
-                                        <span className="slider"></span>
-                                    </label>
-                                </div>
+                                {/* Only show controls if a user is selected */}
+                                {currentUser && (
+                                <>
+                                    <div className="action-toggle-group">
+                                        <label>
+                                            {currentUser.kidName} Going?
+                                            {event.hasPLC && <div style={{fontSize:'0.6rem', color:'#d97706', fontWeight:400}}>(PLC)</div>}
+                                        </label>
+                                        <label className="toggle-switch">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={isMyKidAttending} 
+                                                onChange={(e) => toggleAttendance(event.id, e.target.checked)}
+                                            />
+                                            <span className="slider"></span>
+                                        </label>
+                                    </div>
 
-                                <div className="action-toggle-group">
-                                    <label>I can drive</label>
-                                    <label className="toggle-switch">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={toggleState} 
-                                            onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setDrivingIntents(prev => ({...prev, [intentKey]: true}));
-                                                    toggleExpand(event.id, true);
-                                                } else {
-                                                    if (isDrivingReal) {
-                                                        if(window.confirm("Stop driving?")) {
-                                                            cancelAllDrives(event.id);
+                                    <div className="action-toggle-group">
+                                        <label>I can drive</label>
+                                        <label className="toggle-switch">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={toggleState} 
+                                                onChange={(e) => {
+                                                    if (e.target.checked) {
+                                                        setDrivingIntents(prev => ({...prev, [intentKey]: true}));
+                                                        toggleExpand(event.id, true);
+                                                    } else {
+                                                        if (isDrivingReal) {
+                                                            if(window.confirm("Stop driving?")) {
+                                                                cancelAllDrives(event.id);
+                                                                setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                            }
+                                                        } else {
                                                             setDrivingIntents(prev => ({...prev, [intentKey]: false}));
                                                         }
-                                                    } else {
-                                                        setDrivingIntents(prev => ({...prev, [intentKey]: false}));
                                                     }
-                                                }
-                                            }}
-                                        />
-                                        <span className="slider"></span>
-                                    </label>
-                                </div>
+                                                }}
+                                            />
+                                            <span className="slider"></span>
+                                        </label>
+                                    </div>
+                                </>
+                                )}
                             </div>
                         )}
                     </div>
@@ -486,38 +545,47 @@ function App() {
 
                         {!isAdmin && (
                         <div className="drive-section">
-                            {showMissingInfoWarning && (
-                                <div style={{backgroundColor: '#fefce8', border: '1px solid #fde047', color: '#854d0e', padding: '10px', borderRadius: '6px', marginBottom: '15px', fontSize: '0.9rem', display: 'flex', gap:'8px', alignItems:'center'}}>
-                                    <Icons.Alert /> Please select if you are driving To, From, or Both:
+                            {/* Hide volunteer section if no user is selected */}
+                            {!currentUser ? (
+                                <div style={{textAlign:'center', color:'#666', fontStyle:'italic', padding:'10px'}}>
+                                    Select a family above to volunteer.
                                 </div>
+                            ) : (
+                                <>
+                                    {showMissingInfoWarning && (
+                                        <div style={{backgroundColor: '#fefce8', border: '1px solid #fde047', color: '#854d0e', padding: '10px', borderRadius: '6px', marginBottom: '15px', fontSize: '0.9rem', display: 'flex', gap:'8px', alignItems:'center'}}>
+                                            <Icons.Alert /> Please select if you are driving To, From, or Both:
+                                        </div>
+                                    )}
+
+                                    <div className="drive-grid">
+                                        <div className={`drive-card ${drivingTo ? 'selected' : ''} ${!canDriveTo ? 'disabled' : ''}`} onClick={() => canDriveTo && toggleDriving(event.id, 'TO')}>
+                                            <div className="drive-card-header">
+                                                <span className="drive-label">
+                                                    → Driving TO? 
+                                                    {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}
+                                                </span>
+                                                <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
+                                            </div>
+                                            {drivingTo && <div className="drive-status-text">You are driving.</div>}
+                                        </div>
+
+                                        <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
+                                            <div className="drive-card-header">
+                                                <span className="drive-label">← Driving FROM?</span>
+                                                <div className="checkbox-custom">{drivingFrom && <Icons.Check />}</div>
+                                            </div>
+                                            {drivingFrom && <div className="drive-status-text">You are driving.</div>}
+                                        </div>
+                                    </div>
+                                    <div className="seats-row">
+                                        <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}>
+                                            <Icons.CarSide /> Available Seats (Other Kids):
+                                        </div>
+                                        <input type="number" min="1" max="8" value={getSeats(event.id)} onChange={(e) => updateSeats(event.id, e.target.value)} />
+                                    </div>
+                                </>
                             )}
-
-                            <div className="drive-grid">
-                                <div className={`drive-card ${drivingTo ? 'selected' : ''} ${!canDriveTo ? 'disabled' : ''}`} onClick={() => canDriveTo && toggleDriving(event.id, 'TO')}>
-                                    <div className="drive-card-header">
-                                        <span className="drive-label">
-                                            → Driving TO? 
-                                            {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}
-                                        </span>
-                                        <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
-                                    </div>
-                                    {drivingTo && <div className="drive-status-text">You are driving.</div>}
-                                </div>
-
-                                <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
-                                    <div className="drive-card-header">
-                                        <span className="drive-label">← Driving FROM?</span>
-                                        <div className="checkbox-custom">{drivingFrom && <Icons.Check />}</div>
-                                    </div>
-                                    {drivingFrom && <div className="drive-status-text">You are driving.</div>}
-                                </div>
-                            </div>
-                            <div className="seats-row">
-                                <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}>
-                                    <Icons.CarSide /> Available Seats (Other Kids):
-                                </div>
-                                <input type="number" min="1" max="8" value={getSeats(event.id)} onChange={(e) => updateSeats(event.id, e.target.value)} />
-                            </div>
                         </div>
                         )}
 
@@ -533,7 +601,7 @@ function App() {
                                 <>
                                     <div className="roster-group"><div className="roster-tag">TO EVENT</div>
                                         {event.drivers.filter(d => d.direction === 'TO').map(d => (
-                                            <div key={d.userId} className={`car-card ${d.userId === currentUser.id ? 'is-me' : ''}`}>
+                                            <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
                                                 <div className="car-info">
                                                     <div className="driver-name">🚗 {d.name}</div>
                                                     <div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div>
@@ -543,7 +611,7 @@ function App() {
                                     </div>
                                     <div className="roster-group"><div className="roster-tag">FROM EVENT</div>
                                         {event.drivers.filter(d => d.direction === 'FROM').map(d => (
-                                            <div key={d.userId} className={`car-card ${d.userId === currentUser.id ? 'is-me' : ''}`}>
+                                            <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
                                                 <div className="car-info">
                                                     <div className="driver-name">🚗 {d.name}</div>
                                                     <div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div>
