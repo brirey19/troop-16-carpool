@@ -133,63 +133,112 @@ function App() {
     const directions = ['TO', 'FROM'];
     let updatedDrivers = currentDrivers.map(d => ({ ...d, passengers: [] }));
     
-    // Filter: Only care about people who are "Attending" for the carpool
+    // Filter: Only care about people who are "Attending"
     const attendingIds = currentAttendees
       .filter(a => a.status === 'Attending')
       .map(a => a.id || a);
+
+    const allKidsInDir = INITIAL_USERS.filter(u => attendingIds.includes(u.id));
+    const totalKids = allKidsInDir.length;
 
     directions.forEach(direction => {
       const driversInDir = updatedDrivers.filter(d => d.direction === direction);
       if (driversInDir.length === 0) return; 
 
-      const allKidsInDir = INITIAL_USERS.filter(u => attendingIds.includes(u.id));
+      // Sort drivers by list order
+      const D1 = driversInDir[0];
+      const D2 = driversInDir.length > 1 ? driversInDir[1] : null;
 
-      let kidsToAssign = allKidsInDir.filter(kid => {
-        const parentDriver = updatedDrivers.find(d => d.direction === direction && d.userId === kid.id);
-        if (parentDriver) {
-          parentDriver.passengers.push(kid.kidName);
-          return false; 
-        }
-        return true; 
-      });
-
-      const driversForPool = updatedDrivers.filter(d => d.direction === direction);
+      // GET SEATS + 1 IF OWN KID IS ATTENDING
+      const getSeatsForDriver = (d) => seatConfig[event.id] && d.userId === currentUser?.id ? seatConfig[event.id] : d.seats;
       
-      if (driversForPool.length > 1) {
+      const d1Kid = allKidsInDir.find(k => k.id === D1.userId);
+      const d2Kid = D2 ? allKidsInDir.find(k => k.id === D2.userId) : null;
+
+      // FIXED LOGIC: Input is "Extra Seats", so Total Capacity = Input + (1 if own kid driving)
+      let S1 = getSeatsForDriver(D1);
+      if (d1Kid) S1 += 1;
+
+      let S2 = D2 ? getSeatsForDriver(D2) : 0;
+      if (D2 && d2Kid) S2 += 1;
+
+      // --- LOGIC GATES ---
+
+      // SCENARIO 1: Driver 1 fits everyone
+      if (totalKids <= S1) {
+        D1.passengers = allKidsInDir.map(k => k.kidName);
+      } 
+      // SCENARIO 2: Driver 1 overflows, but Driver 2 fits everyone
+      else if (D2 && totalKids > S1 && totalKids <= S2) {
+        D2.passengers = allKidsInDir.map(k => k.kidName);
+      }
+      // SCENARIO 3: Split Needed (Evenly)
+      else if (D2) {
+        // 1. Assign Own Kids
+        if (d1Kid) D1.passengers.push(d1Kid.kidName);
+        if (d2Kid) D2.passengers.push(d2Kid.kidName);
+
+        // 2. Identify Remaining
+        let remainingKids = allKidsInDir.filter(k => 
+          (!d1Kid || k.id !== d1Kid.id) && (!d2Kid || k.id !== d2Kid.id)
+        );
+
+        // 3. Targets
+        const half = Math.ceil(totalKids / 2);
+        let d1Target = Math.min(half, S1);
+        let d2Target = Math.min(totalKids - d1Target, S2);
+
+        if (d2Target < totalKids - d1Target) {
+            d1Target = Math.min(totalKids - d2Target, S1);
+        }
+
+        // 4. Assign Remaining by Distance
         let edges = [];
-        kidsToAssign.forEach(kid => {
-          driversForPool.forEach(driver => {
-            const driverUser = INITIAL_USERS.find(u => u.id === driver.userId);
-            if (driverUser) { 
-                const dist = calculateDistance(kid.lat, kid.lng, driverUser.lat, driverUser.lng);
-                edges.push({ kid, driverUserId: driver.userId, distance: dist });
-            }
-          });
+        remainingKids.forEach(kid => {
+            const u1 = INITIAL_USERS.find(u => u.id === D1.userId);
+            const u2 = INITIAL_USERS.find(u => u.id === D2.userId);
+            if (u1 && D1.passengers.length < d1Target) edges.push({ kid, driver: D1, dist: calculateDistance(kid.lat, kid.lng, u1.lat, u1.lng) });
+            if (u2 && D2.passengers.length < d2Target) edges.push({ kid, driver: D2, dist: calculateDistance(kid.lat, kid.lng, u2.lat, u2.lng) });
         });
-        edges.sort((a, b) => a.distance - b.distance);
-        const assignedKidIds = new Set();
+
+        edges.sort((a, b) => a.dist - b.dist);
+
+        const assignedIds = new Set();
         edges.forEach(edge => {
-          if (assignedKidIds.has(edge.kid.id)) return; 
-          const driverSeats = seatConfig[event.id] || 3; 
-          const targetDriver = updatedDrivers.find(d => d.userId === edge.driverUserId && d.direction === direction);
-          if (targetDriver && targetDriver.passengers.length < driverSeats) {
-            targetDriver.passengers.push(edge.kid.kidName);
-            assignedKidIds.add(edge.kid.id);
-          }
+            if (assignedIds.has(edge.kid.id)) return; 
+            const target = edge.driver === D1 ? d1Target : d2Target;
+            if (edge.driver.passengers.length < target) {
+                edge.driver.passengers.push(edge.kid.kidName);
+                assignedIds.add(edge.kid.id);
+            }
         });
-      } else if (driversForPool.length === 1) {
-        const singleDriver = driversForPool[0];
-        const driverSeats = seatConfig[event.id] || 3; 
-        kidsToAssign.forEach(kid => {
-          if (singleDriver.passengers.length < driverSeats) {
-            singleDriver.passengers.push(kid.kidName);
-          }
+        
+        const leftovers = remainingKids.filter(k => !assignedIds.has(k.id));
+        leftovers.forEach(kid => {
+            if (D1.passengers.length < S1) D1.passengers.push(kid.kidName);
+            else if (D2.passengers.length < S2) D2.passengers.push(kid.kidName);
+        });
+
+      } 
+      // SCENARIO 4: Only D1 exists but overflows
+      else {
+        // Own kid already added logic check needed? 
+        // Logic above handled assigning own kid? No, separate block.
+        
+        if (d1Kid) {
+            // Already counted S1 to include kid, so just push if not there
+            if (!D1.passengers.includes(d1Kid.kidName)) D1.passengers.push(d1Kid.kidName);
+        }
+        
+        const others = allKidsInDir.filter(k => !d1Kid || k.id !== d1Kid.id);
+        others.forEach(kid => {
+            if (D1.passengers.length < S1) D1.passengers.push(kid.kidName);
         });
       }
     });
     
     return { ...event, drivers: updatedDrivers };
-  }, [seatConfig]);
+  }, [seatConfig, currentUser]); 
 
   // --- API & POLLING ---
   const fetchEvents = async () => {
@@ -316,17 +365,14 @@ function App() {
     saveToCloud(newEvents); 
   };
 
-  // UPDATED: Handle 3-State Logic
   const toggleAttendance = (eventId, newStatus) => {
     if (!currentUser) return; 
     const newEvents = events.map(event => {
       if (event.id !== eventId) return event;
       
       let updatedAttendees = [...event.attendees];
-      // Remove existing status for this user
       updatedAttendees = updatedAttendees.filter(a => (a.id || a) !== currentUser.id);
 
-      // If newStatus is valid (Attending/Not Attending), add it. If null, leave it removed.
       if (newStatus) {
         updatedAttendees.push({ id: currentUser.id, status: newStatus });
       }
@@ -450,9 +496,8 @@ function App() {
             {events.map(event => {
                 const isExpanded = expandedEvents[event.id];
                 
-                // USER STATUS
                 const myAttendance = currentUser ? event.attendees.find(a => (a.id || a) === currentUser.id) : null;
-                const status = myAttendance ? myAttendance.status : null; // "Attending", "Not Attending", or null
+                const status = myAttendance ? myAttendance.status : null; 
 
                 const drivingTo = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO') : null;
                 const drivingFrom = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'FROM') : null;
@@ -463,7 +508,13 @@ function App() {
                 const toggleState = !!isDrivingReal || !!isDrivingIntent;
                 const showMissingInfoWarning = toggleState && !isDrivingReal;
 
-                // SUMMARY COUNTS
+                const toDriverCount = event.drivers.filter(d => d.direction === 'TO').length;
+                const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
+                
+                // VARS
+                const canDriveTo = drivingTo || toDriverCount < MAX_DRIVERS;
+                const canDriveFrom = drivingFrom || fromDriverCount < MAX_DRIVERS;
+
                 const attendingCount = event.attendees.filter(a => a.status === 'Attending').length;
                 const notAttendingCount = event.attendees.filter(a => a.status === 'Not Attending').length;
 
