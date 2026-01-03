@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import './App.css';
 
 // *** API URL ***
@@ -57,8 +57,51 @@ const formatForInput = (dateStr) => {
 
 const generateId = () => Math.floor(Math.random() * 1000000000).toString();
 
+// Moved outside component to prevent ReferenceError
+const checkRosterUnlock = (eventDateStr) => {
+  const now = new Date();
+  const ctString = now.toLocaleString("en-US", { timeZone: "America/Chicago" });
+  const target = new Date(eventDateStr);
+  target.setHours(9, 0, 0, 0); 
+  return new Date(ctString) >= target;
+};
+
+// --- DEBUG: COMPARE HELPER ---
+const generateDiffReport = (localList, cloudList) => {
+  let diffs = [];
+  
+  if (localList.length !== cloudList.length) {
+    diffs.push(`Event count mismatch: Local ${localList.length} vs Cloud ${cloudList.length}`);
+  }
+
+  cloudList.forEach(cEvt => {
+    const lEvt = localList.find(l => l.id === cEvt.id);
+    if (!lEvt) {
+      diffs.push(`New Event found on Cloud: ${cEvt.title}`);
+      return;
+    }
+
+    const lDrivers = (lEvt.drivers || []).map(d => `${d.userId}-${d.direction}`).sort().join(',');
+    const cDrivers = (cEvt.drivers || []).map(d => `${d.userId}-${d.direction}`).sort().join(',');
+    if (lDrivers !== cDrivers) {
+      diffs.push(`Event "${cEvt.title}": Drivers changed.`);
+    }
+
+    const lAtt = (lEvt.attendees || []).map(a => a.id || a).sort().join(',');
+    const cAtt = (cEvt.attendees || []).map(a => a.id || a).sort().join(',');
+    if (lAtt !== cAtt) {
+      diffs.push(`Event "${cEvt.title}": Attendees changed.`);
+    }
+
+    if (lEvt.hasPLC !== cEvt.hasPLC) {
+      diffs.push(`Event "${cEvt.title}": PLC Status mismatch`);
+    }
+  });
+
+  return diffs;
+};
+
 function App() {
-  // START AS NULL (No User Selected)
   const [currentUser, setCurrentUser] = useState(null); 
   const [isAdmin, setIsAdmin] = useState(false); 
   
@@ -70,6 +113,7 @@ function App() {
   // Polling State
   const [incomingEvents, setIncomingEvents] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [diffReport, setDiffReport] = useState([]); 
 
   const [seatConfig, setSeatConfig] = useState({});
   const [expandedEvents, setExpandedEvents] = useState({});
@@ -80,89 +124,24 @@ function App() {
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventHasPLC, setNewEventHasPLC] = useState(false);
 
-  // --- API & POLLING ---
-  const fetchEvents = async () => {
-    try {
-      const res = await fetch(API_URL);
-      const data = await res.json();
-      const validEvents = data.filter(e => e.id && String(e.id).trim() !== "");
-      return validEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
-    } catch (err) {
-      console.error("Error fetching", err);
-      return null;
-    }
-  };
+  // --- LOGIC: ASSIGNMENT ---
+  const autoAssignByDistance = useCallback((event) => {
+    // GUARD: If event is missing, return safely
+    if (!event) return event;
+    const currentDrivers = event.drivers || [];
+    const currentAttendees = event.attendees || [];
 
-  useEffect(() => {
-    fetchEvents().then(data => {
-      if (data) {
-        setEvents(data);
-        setLoading(false);
-      }
-    });
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (saving || loading) return; 
-
-      fetchEvents().then(newData => {
-        if (!newData) return;
-        const currentStr = JSON.stringify(events);
-        const newStr = JSON.stringify(newData);
-        if (currentStr !== newStr) {
-          setIncomingEvents(newData);
-          setUpdateAvailable(true);
-        }
-      });
-    }, 15000); 
-
-    return () => clearInterval(interval);
-  }, [events, saving, loading]);
-
-  const applyUpdate = () => {
-    if (incomingEvents) {
-      setEvents(incomingEvents);
-      setUpdateAvailable(false);
-      setIncomingEvents(null);
-    }
-  };
-
-  const saveToCloud = (newEvents) => {
-    const validEvents = newEvents.filter(e => e.id && String(e.id).trim() !== "");
-    const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
-    setEvents(sortedEvents);
-    setUpdateAvailable(false);
-    setSaving(true);
-    fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(sortedEvents) })
-    .then(() => setSaving(false))
-    .catch(() => { alert("Error saving"); setSaving(false); });
-  };
-
-  // --- LOGIC ---
-  const checkRosterUnlock = (eventDateStr) => {
-    const now = new Date();
-    const ctString = now.toLocaleString("en-US", { timeZone: "America/Chicago" });
-    const target = new Date(eventDateStr);
-    target.setHours(9, 0, 0, 0); 
-    return new Date(ctString) >= target;
-  };
-
-  const autoAssignByDistance = (event) => {
     const directions = ['TO', 'FROM'];
-    let updatedDrivers = event.drivers.map(d => ({ ...d, passengers: [...d.passengers] }));
-    const attendeeIds = event.attendees.map(a => a.id || a);
+    
+    // Reset passengers
+    let updatedDrivers = currentDrivers.map(d => ({ ...d, passengers: [] }));
+    const attendeeIds = currentAttendees.map(a => a.id || a);
 
     directions.forEach(direction => {
       const driversInDir = updatedDrivers.filter(d => d.direction === direction);
       if (driversInDir.length === 0) return; 
 
       const allKidsInDir = INITIAL_USERS.filter(u => attendeeIds.includes(u.id));
-
-      updatedDrivers = updatedDrivers.map(d => {
-        if (d.direction === direction) return { ...d, passengers: [] };
-        return d;
-      });
 
       let kidsToAssign = allKidsInDir.filter(kid => {
         const parentDriver = updatedDrivers.find(d => d.direction === direction && d.userId === kid.id);
@@ -180,32 +159,122 @@ function App() {
         kidsToAssign.forEach(kid => {
           driversForPool.forEach(driver => {
             const driverUser = INITIAL_USERS.find(u => u.id === driver.userId);
-            const dist = calculateDistance(kid.lat, kid.lng, driverUser.lat, driverUser.lng);
-            edges.push({ kid, driverUserId: driver.userId, distance: dist });
+            if (driverUser) { 
+                const dist = calculateDistance(kid.lat, kid.lng, driverUser.lat, driverUser.lng);
+                edges.push({ kid, driverUserId: driver.userId, distance: dist });
+            }
           });
         });
         edges.sort((a, b) => a.distance - b.distance);
         const assignedKidIds = new Set();
         edges.forEach(edge => {
           if (assignedKidIds.has(edge.kid.id)) return; 
+          const driverSeats = seatConfig[event.id] || 3; 
           const targetDriver = updatedDrivers.find(d => d.userId === edge.driverUserId && d.direction === direction);
-          if (targetDriver && targetDriver.passengers.length < targetDriver.seats) {
+          if (targetDriver && targetDriver.passengers.length < driverSeats) {
             targetDriver.passengers.push(edge.kid.kidName);
             assignedKidIds.add(edge.kid.id);
           }
         });
-      } else {
+      } else if (driversForPool.length === 1) {
         const singleDriver = driversForPool[0];
+        const driverSeats = seatConfig[event.id] || 3; 
         kidsToAssign.forEach(kid => {
-          if (singleDriver.passengers.length < singleDriver.seats) {
+          if (singleDriver.passengers.length < driverSeats) {
             singleDriver.passengers.push(kid.kidName);
           }
         });
       }
     });
+    
     return { ...event, drivers: updatedDrivers };
+  }, [seatConfig]);
+
+  // --- API & POLLING ---
+  
+  const fetchEvents = async () => {
+    try {
+      const res = await fetch(API_URL);
+      const data = await res.json();
+      
+      // GUARD: Ensure Array
+      if (!Array.isArray(data)) {
+        console.error("API did not return an array:", data);
+        return null;
+      }
+
+      // Strict Filter & ID String Force
+      const validEvents = data
+        .filter(e => e.id && String(e.id).trim() !== "")
+        .map(e => ({ ...e, id: String(e.id) }));
+
+      return validEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+    } catch (err) {
+      console.error("Error fetching", err);
+      return null;
+    }
   };
 
+  useEffect(() => {
+    fetchEvents().then(data => {
+      if (data) {
+        // Hydrate initially so "Current" matches future "Polled" structure
+        const hydrated = data.map(e => autoAssignByDistance(e));
+        setEvents(hydrated);
+        setLoading(false);
+      }
+    });
+  }, [autoAssignByDistance]); 
+
+  // POLLING INTERVAL
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (saving || loading) return; 
+
+      fetchEvents().then(newData => {
+        if (!newData) return;
+        
+        const hydratedNewData = newData.map(e => autoAssignByDistance(e));
+        const report = generateDiffReport(events, hydratedNewData);
+
+        if (report.length > 0) {
+          console.log("Detected Changes:", report);
+          setDiffReport(report); 
+          setIncomingEvents(hydratedNewData);
+          setUpdateAvailable(true);
+        }
+      });
+    }, 15000); 
+
+    return () => clearInterval(interval);
+  }, [events, saving, loading, autoAssignByDistance]);
+
+  const applyUpdate = () => {
+    // UPDATED: No alert, apply immediately
+    if (incomingEvents) {
+      setEvents(incomingEvents);
+      setUpdateAvailable(false);
+      setIncomingEvents(null);
+      setDiffReport([]);
+    }
+  };
+
+  const saveToCloud = (newEvents) => {
+    const validEvents = newEvents
+      .filter(e => e.id && String(e.id).trim() !== "")
+      .map(e => ({ ...e, id: String(e.id) }));
+
+    const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
+    
+    setEvents(sortedEvents);
+    setUpdateAvailable(false);
+    setSaving(true);
+    fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(sortedEvents) })
+    .then(() => setSaving(false))
+    .catch(() => { alert("Error saving"); setSaving(false); });
+  };
+
+  // --- EVENT HANDLERS ---
   const toggleExpand = (eventId, forceState) => {
     setExpandedEvents(prev => ({ ...prev, [eventId]: forceState !== undefined ? forceState : !prev[eventId] }));
   };
@@ -213,16 +282,14 @@ function App() {
   const getSeats = (eventId) => seatConfig[eventId] || 3;
 
   const updateSeats = (eventId, val) => {
-    if (!currentUser) return; // Guard
+    if (!currentUser) return; 
     const newSeats = parseInt(val);
     setSeatConfig({ ...seatConfig, [eventId]: newSeats });
+    
     const newEvents = events.map(event => {
         if (event.id !== eventId) return event;
-        const evtWithNewSeats = {
-            ...event,
-            drivers: event.drivers.map(d => d.userId === currentUser.id ? { ...d, seats: newSeats } : d)
-        };
-        return autoAssignByDistance(evtWithNewSeats);
+        const updatedDrivers = event.drivers.map(d => d.userId === currentUser.id ? { ...d, seats: newSeats } : d);
+        return autoAssignByDistance({ ...event, drivers: updatedDrivers });
     });
     saveToCloud(newEvents);
   };
@@ -255,7 +322,7 @@ function App() {
   };
 
   const toggleAttendance = (eventId, isAttending) => {
-    if (!currentUser) return; // Guard
+    if (!currentUser) return; 
     const newEvents = events.map(event => {
       if (event.id !== eventId) return event;
       
@@ -267,14 +334,13 @@ function App() {
         updatedAttendees.push({ id: currentUser.id, type: type });
       }
       
-      const intermediateEvent = { ...event, attendees: updatedAttendees };
-      return autoAssignByDistance(intermediateEvent);
+      return autoAssignByDistance({ ...event, attendees: updatedAttendees });
     });
     saveToCloud(newEvents);
   };
 
   const toggleDriving = (eventId, direction) => {
-    if (!currentUser) return; // Guard
+    if (!currentUser) return; 
     const newEvents = events.map(event => {
       if (event.id !== eventId) return event;
       
@@ -297,14 +363,13 @@ function App() {
         updatedDrivers.push(newDriver);
       }
 
-      const intermediateEvent = { ...event, drivers: updatedDrivers };
-      return autoAssignByDistance(intermediateEvent);
+      return autoAssignByDistance({ ...event, drivers: updatedDrivers });
     });
     saveToCloud(newEvents);
   };
 
   const cancelAllDrives = (eventId) => {
-    if (!currentUser) return; // Guard
+    if (!currentUser) return; 
     const newEvents = events.map(event => {
         if (event.id !== eventId) return event;
         const intermediateEvent = {
@@ -316,13 +381,12 @@ function App() {
     saveToCloud(newEvents);
   };
 
-  // --- SUB-COMPONENTS ---
+  // --- UI ---
   const DateBadge = ({ dateStr }) => {
     const d = new Date(dateStr);
     const month = d.toLocaleDateString('en-US', { month: 'short' });
     const day = d.toLocaleDateString('en-US', { day: 'numeric' });
     const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    
     return (
         <div className="date-badge">
             <span className="db-month">{month}</span>
@@ -332,18 +396,15 @@ function App() {
     );
   };
 
-  // --- UI ---
   return (
     <div>
       <header className="top-app-bar">
         <h1>Troop 16 Scout Carpool</h1>
         <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
             {saving && <span style={{fontSize:'0.8rem', color:'#666'}}><Icons.Sync /> Saving...</span>}
-            
-            {/* UPDATE BUTTON */}
             {updateAvailable && (
               <button className="update-btn" onClick={applyUpdate}>
-                <Icons.Sync /> Update Available
+                <Icons.Sync /> Other users have made updates
               </button>
             )}
         </div>
@@ -353,11 +414,10 @@ function App() {
         
         {!loading && (
         <>
-            {/* USER SELECTOR */}
             <div className="user-selector">
                 <label style={{fontSize: '0.85rem', fontWeight: 600, color: '#666'}}>Select Family:</label>
                 <select 
-                    value={currentUser ? currentUser.id : ""} // Handle Null Value
+                    value={currentUser ? currentUser.id : ""} 
                     onChange={(e) => {
                       if (e.target.value === "") return;
                       setCurrentUser(INITIAL_USERS.find(u => u.id === parseInt(e.target.value)));
@@ -393,7 +453,6 @@ function App() {
             {events.map(event => {
                 const isExpanded = expandedEvents[event.id];
                 
-                // Safe checks for currentUser (might be null)
                 const myAttendance = currentUser ? event.attendees.find(a => (a.id || a) === currentUser.id) : null;
                 const isMyKidAttending = !!myAttendance;
 
@@ -410,6 +469,7 @@ function App() {
                 const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
                 const canDriveTo = drivingTo || toDriverCount < MAX_DRIVERS;
                 const canDriveFrom = drivingFrom || fromDriverCount < MAX_DRIVERS;
+                
                 const isRosterUnlocked = checkRosterUnlock(event.date);
                 const isRosterVisible = isRosterUnlocked || isAdmin;
 
@@ -419,96 +479,63 @@ function App() {
 
                 return (
                 <div key={event.id} className="card">
-                    
-                    {/* HEADER */}
                     <div className="event-header">
-                        
                         {!isAdmin && <DateBadge dateStr={event.date} />}
-
                         <div className="header-info">
                             {isAdmin ? (
                                 <>
                                     <button className="delete-btn" onClick={() => handleDeleteEvent(event.id)}>DELETE</button>
                                     <input className="edit-input" type="text" value={event.title} onChange={(e) => handleEditEvent(event.id, 'title', e.target.value)} />
                                     <div className="meta-row">
-                                        <input 
-                                            className="edit-input" 
-                                            type="datetime-local" 
-                                            value={formatForInput(event.date)} 
-                                            onChange={(e) => handleEditEvent(event.id, 'date', e.target.value)} 
-                                        />
+                                        <input className="edit-input" type="datetime-local" value={formatForInput(event.date)} onChange={(e) => handleEditEvent(event.id, 'date', e.target.value)} />
                                     </div>
                                 </>
                             ) : (
                                 <>
                                     <h2>{event.title}</h2>
                                     <div className="meta-row">
-                                        <div className="meta-item">
-                                            <Icons.MapPin />
-                                            {event.location || 'No Location'}
-                                        </div>
+                                        <div className="meta-item"><Icons.MapPin />{event.location || 'No Location'}</div>
                                     </div>
-                                    {event.hasPLC && (
-                                        <div className="meta-row" style={{color:'#d97706', fontWeight:600}}>
-                                            <Icons.Flag /> PLC Meeting @ {getPLCTime(event.date)}
-                                        </div>
-                                    )}
+                                    {event.hasPLC && <div className="meta-row" style={{color:'#d97706', fontWeight:600}}><Icons.Flag /> PLC Meeting @ {getPLCTime(event.date)}</div>}
                                 </>
                             )}
                             
                             <div className="stub-summary">
                                 <div className="summary-item"><span className="summary-badge kids">{attendingList.length} Going</span></div>
-                                <div className="summary-item">
-                                    <span className="summary-badge to">To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}
-                                </div>
-                                <div className="summary-item">
-                                    <span className="summary-badge from">From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}
-                                </div>
+                                <div className="summary-item"><span className="summary-badge to">To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
+                                <div className="summary-item"><span className="summary-badge from">From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
                             </div>
                         </div>
 
                         {!isAdmin && (
                             <div className="header-actions">
-                                {/* Only show controls if a user is selected */}
                                 {currentUser && (
                                 <>
                                     <div className="action-toggle-group">
-                                        <label>
-                                            {currentUser.kidName} Going?
-                                            {event.hasPLC && <div style={{fontSize:'0.6rem', color:'#d97706', fontWeight:400}}>(PLC)</div>}
-                                        </label>
+                                        <label>{currentUser.kidName} Going? {event.hasPLC && <span style={{color:'#d97706'}}>(PLC)</span>}</label>
                                         <label className="toggle-switch">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={isMyKidAttending} 
-                                                onChange={(e) => toggleAttendance(event.id, e.target.checked)}
-                                            />
+                                            <input type="checkbox" checked={isMyKidAttending} onChange={(e) => toggleAttendance(event.id, e.target.checked)} />
                                             <span className="slider"></span>
                                         </label>
                                     </div>
-
                                     <div className="action-toggle-group">
                                         <label>I can drive</label>
                                         <label className="toggle-switch">
-                                            <input 
-                                                type="checkbox" 
-                                                checked={toggleState} 
-                                                onChange={(e) => {
-                                                    if (e.target.checked) {
-                                                        setDrivingIntents(prev => ({...prev, [intentKey]: true}));
-                                                        toggleExpand(event.id, true);
-                                                    } else {
-                                                        if (isDrivingReal) {
-                                                            if(window.confirm("Stop driving?")) {
-                                                                cancelAllDrives(event.id);
-                                                                setDrivingIntents(prev => ({...prev, [intentKey]: false}));
-                                                            }
-                                                        } else {
+                                            <input type="checkbox" checked={toggleState} onChange={(e) => {
+                                                if (e.target.checked) {
+                                                    setDrivingIntents(prev => ({...prev, [intentKey]: true}));
+                                                    toggleExpand(event.id, true);
+                                                } else {
+                                                    if (isDrivingReal) {
+                                                        if(window.confirm("Stop driving?")) {
+                                                            cancelAllDrives(event.id);
                                                             setDrivingIntents(prev => ({...prev, [intentKey]: false}));
                                                         }
+                                                    } else {
+                                                        setDrivingIntents(prev => ({...prev, [intentKey]: false}));
                                                     }
-                                                }}
-                                            />
+                                                }
+                                            }} />
                                             <span className="slider"></span>
                                         </label>
                                     </div>
@@ -520,14 +547,12 @@ function App() {
 
                     {isExpanded && (
                     <div className="card-body">
-                        
                         <div className="attendee-section">
                             <div className="attendee-title">Who is going?</div>
                             <div className="attendee-grid">
                                 {attendingList.map(u => {
                                     const hasRideTo = event.drivers.some(d => d.direction === 'TO' && d.passengers.includes(u.kidName));
                                     const hasRideFrom = event.drivers.some(d => d.direction === 'FROM' && d.passengers.includes(u.kidName));
-
                                     return (
                                         <div key={u.id} className="attendee-chip">
                                             {u.kidName}
@@ -545,11 +570,8 @@ function App() {
 
                         {!isAdmin && (
                         <div className="drive-section">
-                            {/* Hide volunteer section if no user is selected */}
                             {!currentUser ? (
-                                <div style={{textAlign:'center', color:'#666', fontStyle:'italic', padding:'10px'}}>
-                                    Select a family above to volunteer.
-                                </div>
+                                <div style={{textAlign:'center', color:'#666', fontStyle:'italic', padding:'10px'}}>Select a family above to volunteer.</div>
                             ) : (
                                 <>
                                     {showMissingInfoWarning && (
@@ -557,19 +579,14 @@ function App() {
                                             <Icons.Alert /> Please select if you are driving To, From, or Both:
                                         </div>
                                     )}
-
                                     <div className="drive-grid">
                                         <div className={`drive-card ${drivingTo ? 'selected' : ''} ${!canDriveTo ? 'disabled' : ''}`} onClick={() => canDriveTo && toggleDriving(event.id, 'TO')}>
                                             <div className="drive-card-header">
-                                                <span className="drive-label">
-                                                    → Driving TO? 
-                                                    {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}
-                                                </span>
+                                                <span className="drive-label">→ Driving TO? {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}</span>
                                                 <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
                                             </div>
                                             {drivingTo && <div className="drive-status-text">You are driving.</div>}
                                         </div>
-
                                         <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
                                             <div className="drive-card-header">
                                                 <span className="drive-label">← Driving FROM?</span>
@@ -579,9 +596,7 @@ function App() {
                                         </div>
                                     </div>
                                     <div className="seats-row">
-                                        <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}>
-                                            <Icons.CarSide /> Available Seats (Other Kids):
-                                        </div>
+                                        <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}><Icons.CarSide /> Available Seats (Other Kids):</div>
                                         <input type="number" min="1" max="8" value={getSeats(event.id)} onChange={(e) => updateSeats(event.id, e.target.value)} />
                                     </div>
                                 </>
@@ -602,20 +617,14 @@ function App() {
                                     <div className="roster-group"><div className="roster-tag">TO EVENT</div>
                                         {event.drivers.filter(d => d.direction === 'TO').map(d => (
                                             <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
-                                                <div className="car-info">
-                                                    <div className="driver-name">🚗 {d.name}</div>
-                                                    <div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div>
-                                                </div>
+                                                <div className="car-info"><div className="driver-name">🚗 {d.name}</div><div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div></div>
                                             </div>
                                         ))}
                                     </div>
                                     <div className="roster-group"><div className="roster-tag">FROM EVENT</div>
                                         {event.drivers.filter(d => d.direction === 'FROM').map(d => (
                                             <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
-                                                <div className="car-info">
-                                                    <div className="driver-name">🚗 {d.name}</div>
-                                                    <div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div>
-                                                </div>
+                                                <div className="car-info"><div className="driver-name">🚗 {d.name}</div><div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div></div>
                                             </div>
                                         ))}
                                     </div>
@@ -624,7 +633,6 @@ function App() {
                         </div>
                     </div>
                     )}
-
                     <div className="expand-trigger" onClick={() => toggleExpand(event.id)}>
                         {isExpanded ? <>Hide Details <Icons.ChevronUp /></> : <>View Details <Icons.ChevronDown /></>}
                     </div>
@@ -633,15 +641,12 @@ function App() {
             })}
         </>
         )}
-
-        {/* ADMIN FOOTER */}
         <div className="admin-footer">
             <div style={{display:'flex', alignItems:'center', gap:'5px', fontSize:'0.85rem'}}>
                 <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
                 Admin Mode
             </div>
         </div>
-
       </div>
     </div>
   );
