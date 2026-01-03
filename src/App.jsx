@@ -78,7 +78,12 @@ function App() {
     fetch(API_URL)
       .then(res => res.json())
       .then(data => { 
-        const sortedData = data.sort((a, b) => new Date(a.date) - new Date(b.date));
+        // FILTER AND SORT
+        // 1. Filter: Ensure ID exists and is not empty
+        const validEvents = data.filter(e => e.id && String(e.id).trim() !== "");
+        // 2. Sort: Chronological
+        const sortedData = validEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+        
         setEvents(sortedData); 
         setLoading(false); 
       })
@@ -290,7 +295,6 @@ function App() {
         <h1>Troop 16 Scout Carpool</h1>
         <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
             {saving && <span style={{fontSize:'0.8rem', color:'#666'}}><Icons.Sync /> Saving...</span>}
-            <div style={{fontSize: '0.85rem', color:'#666'}}>{isAdmin ? "Admin" : "User"}</div>
         </div>
       </header>
 
@@ -298,7 +302,7 @@ function App() {
         
         {!loading && (
         <>
-            {/* USER SELECTOR - MOVED TO TOP */}
+            {/* USER SELECTOR */}
             <div className="user-selector">
                 <label style={{fontSize: '0.85rem', fontWeight: 600, color: '#666'}}>Select Family:</label>
                 <select 
@@ -562,7 +566,7 @@ function App() {
         </>
         )}
 
-        {/* ADMIN FOOTER - MOVED TO BOTTOM */}
+        {/* ADMIN FOOTER */}
         <div className="admin-footer">
             <div style={{display:'flex', alignItems:'center', gap:'5px', fontSize:'0.85rem'}}>
                 <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
