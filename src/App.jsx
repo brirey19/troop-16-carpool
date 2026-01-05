@@ -465,11 +465,11 @@ function App() {
                             )}
                             <div className="stub-summary">
                                 <div className="summary-item">
-                                    <span className="summary-badge kids">{attendingCount} Going</span>
+                                    <span className="summary-badge kids">{attendingCount} Scouts Going</span>
                                     {notAttendingCount > 0 && <span className="summary-badge missing">{notAttendingCount} Not Going</span>}
                                 </div>
-                                <div className="summary-item"><span className="summary-badge to">To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
-                                <div className="summary-item"><span className="summary-badge from">From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
+                                <div className="summary-item"><span className="summary-badge to">Driving To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
+                                <div className="summary-item"><span className="summary-badge from">Driving From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
                             </div>
                         </div>
                         {!isAdmin && (
@@ -550,7 +550,7 @@ function App() {
                                                 <span className="drive-label">→ Driving TO? {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}</span>
                                                 <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
                                             </div>
-                                            {drivingTo && <div className="drive-status-text">You are driving.</div>}
+                                            {drivingTo && <div className="drive-status-text">Thanks for volunteering!</div>}
                                         </div>
                                         <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
                                             <div className="drive-card-header">
