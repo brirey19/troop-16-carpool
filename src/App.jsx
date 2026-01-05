@@ -557,7 +557,7 @@ function App() {
                                                 <span className="drive-label">← Driving FROM?</span>
                                                 <div className="checkbox-custom">{drivingFrom && <Icons.Check />}</div>
                                             </div>
-                                            {drivingFrom && <div className="drive-status-text">You are driving.</div>}
+                                            {drivingFrom && <div className="drive-status-text">Thanks for volunteering!</div>}
                                         </div>
                                     </div>
                                     <div className="seats-row">
