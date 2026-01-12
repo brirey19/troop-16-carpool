@@ -66,7 +66,6 @@ const checkRosterUnlock = (eventDateStr) => {
   return new Date(ctString) >= target;
 };
 
-// Check if event is Today or Future
 const isFutureEvent = (dateStr) => {
   const eventDate = new Date(dateStr);
   const today = new Date();
@@ -99,11 +98,8 @@ function App() {
   const [events, setEvents] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  
-  // Ref to track saving status synchronously for polling loop
   const isSavingRef = useRef(false);
 
-  // Polling State
   const [incomingEvents, setIncomingEvents] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [diffReport, setDiffReport] = useState([]); 
@@ -233,13 +229,9 @@ function App() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      // If UI is saving, skip polling to avoid overwrite race conditions
       if (isSavingRef.current || loading) return; 
-
       fetchEvents().then(newData => {
-        // Double check ref in case saving started while fetch was in flight
         if (!newData || isSavingRef.current) return;
-        
         const hydratedNewData = newData.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
@@ -269,7 +261,6 @@ function App() {
   };
 
   const saveToCloud = (newEvents) => {
-    // 1. Set Flags immediately
     isSavingRef.current = true;
     setSaving(true);
 
@@ -289,14 +280,11 @@ function App() {
 
     const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
     
-    // 2. Optimistic Update
     setEvents(sortedEvents); 
     setUpdateAvailable(false);
     
-    // 3. Network Request
     fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(sortedEvents) })
     .then(() => {
-      // 4. Clear Flags on Success
       isSavingRef.current = false;
       setSaving(false);
     })
@@ -561,8 +549,8 @@ function App() {
                                     <span className="summary-badge kids">{attendingCount} Going</span>
                                     {notAttendingCount > 0 && <span className="summary-badge missing">{notAttendingCount} Not Going</span>}
                                 </div>
-                                <div className="summary-item"><span className="summary-badge to">To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
-                                <div className="summary-item"><span className="summary-badge from">From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
+                                <div className="summary-item"><span className="summary-badge to">Driving To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
+                                <div className="summary-item"><span className="summary-badge from">Driving From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
                             </div>
                         </div>
                         {!isAdmin && (
@@ -643,14 +631,14 @@ function App() {
                                                 <span className="drive-label">→ Driving TO? {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}</span>
                                                 <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
                                             </div>
-                                            {drivingTo && <div className="drive-status-text">You are driving.</div>}
+                                            {drivingTo && <div className="drive-status-text">Thanks for volunteering!</div>}
                                         </div>
                                         <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
                                             <div className="drive-card-header">
                                                 <span className="drive-label">← Driving FROM?</span>
                                                 <div className="checkbox-custom">{drivingFrom && <Icons.Check />}</div>
                                             </div>
-                                            {drivingFrom && <div className="drive-status-text">You are driving.</div>}
+                                            {drivingFrom && <div className="drive-status-text">Thanks for volunteering!</div>}
                                         </div>
                                     </div>
                                     <div className="seats-row">
