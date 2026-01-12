@@ -1,5 +1,5 @@
 // src/App.jsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 
 // *** API URL ***
@@ -10,7 +10,7 @@ const Icons = {
   MapPin: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
   Check: () => <svg className="icon-success" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
   X: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>,
-  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
+  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
   ChevronDown: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>,
   ChevronUp: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>,
   Alert: () => <svg className="icon" style={{color: '#854d0e'}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
@@ -70,7 +70,7 @@ const checkRosterUnlock = (eventDateStr) => {
 const isFutureEvent = (dateStr) => {
   const eventDate = new Date(dateStr);
   const today = new Date();
-  today.setHours(0, 0, 0, 0); // Start of today (Midnight)
+  today.setHours(0, 0, 0, 0); 
   return eventDate >= today;
 };
 
@@ -100,6 +100,9 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
+  // Ref to track saving status synchronously for polling loop
+  const isSavingRef = useRef(false);
+
   // Polling State
   const [incomingEvents, setIncomingEvents] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -215,7 +218,6 @@ function App() {
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
-        // Load ALL data into state (preserve history for Save)
         const hydrated = data.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
@@ -231,9 +233,13 @@ function App() {
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (saving || loading) return; 
+      // If UI is saving, skip polling to avoid overwrite race conditions
+      if (isSavingRef.current || loading) return; 
+
       fetchEvents().then(newData => {
-        if (!newData) return;
+        // Double check ref in case saving started while fetch was in flight
+        if (!newData || isSavingRef.current) return;
+        
         const hydratedNewData = newData.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
@@ -251,7 +257,7 @@ function App() {
       });
     }, 15000); 
     return () => clearInterval(interval);
-  }, [events, saving, loading, autoAssignByDistance]);
+  }, [events, loading, autoAssignByDistance]);
 
   const applyUpdate = () => {
     if (incomingEvents) {
@@ -263,6 +269,10 @@ function App() {
   };
 
   const saveToCloud = (newEvents) => {
+    // 1. Set Flags immediately
+    isSavingRef.current = true;
+    setSaving(true);
+
     const processedEvents = newEvents.map(ev => {
       const isLocked = checkRosterUnlock(ev.date);
       if (!isLocked) {
@@ -279,12 +289,22 @@ function App() {
 
     const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
     
+    // 2. Optimistic Update
     setEvents(sortedEvents); 
     setUpdateAvailable(false);
-    setSaving(true);
+    
+    // 3. Network Request
     fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(sortedEvents) })
-    .then(() => setSaving(false))
-    .catch(() => { alert("Error saving"); setSaving(false); });
+    .then(() => {
+      // 4. Clear Flags on Success
+      isSavingRef.current = false;
+      setSaving(false);
+    })
+    .catch(() => { 
+      alert("Error saving"); 
+      isSavingRef.current = false;
+      setSaving(false); 
+    });
   };
 
   // --- HANDLERS ---
