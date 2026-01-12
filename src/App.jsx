@@ -104,7 +104,7 @@ function App() {
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventHasPLC, setNewEventHasPLC] = useState(false);
 
-  // --- LOGIC: ASSIGNMENT ---
+  // --- LOGIC: STANDARD ASSIGNMENT ---
   const autoAssignByDistance = useCallback((event) => {
     if (!event) return event;
     const currentDrivers = event.drivers || [];
@@ -205,7 +205,6 @@ function App() {
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
-        // Initial load also respects lockedRoster
         const hydrated = data.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
@@ -222,11 +221,8 @@ function App() {
   useEffect(() => {
     const interval = setInterval(() => {
       if (saving || loading) return; 
-
       fetchEvents().then(newData => {
         if (!newData) return;
-        
-        // BUG FIX: Hydration must respect Locked Roster logic, or diffs will fail.
         const hydratedNewData = newData.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
@@ -234,9 +230,7 @@ function App() {
             }
             return autoAssignByDistance(ev);
         });
-
         const report = generateDiffReport(events, hydratedNewData);
-
         if (report.length > 0) {
           console.log("Detected Changes:", report);
           setDiffReport(report); 
@@ -245,7 +239,6 @@ function App() {
         }
       });
     }, 15000); 
-
     return () => clearInterval(interval);
   }, [events, saving, loading, autoAssignByDistance]);
 
@@ -261,11 +254,14 @@ function App() {
   const saveToCloud = (newEvents) => {
     const processedEvents = newEvents.map(ev => {
       const isLocked = checkRosterUnlock(ev.date);
+      // NOTE: We trust the event passed in is already structured correctly by toggleDriving
+      // If unlocked, we recalc to be safe. If locked, we assume the handler did the surgery.
       if (!isLocked) {
         const calculated = autoAssignByDistance(ev);
         return { ...calculated, lockedRoster: calculated.drivers };
       } else {
-        return ev;
+        // If locked, we save the current state as the new lock
+        return { ...ev, lockedRoster: ev.drivers };
       }
     });
 
@@ -274,7 +270,6 @@ function App() {
       .map(e => ({ ...e, id: String(e.id) }));
 
     const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
-    
     setEvents(sortedEvents); 
     setUpdateAvailable(false);
     setSaving(true);
@@ -288,6 +283,7 @@ function App() {
     setExpandedEvents(prev => ({ ...prev, [eventId]: forceState !== undefined ? forceState : !prev[eventId] }));
   };
   const getSeats = (eventId) => seatConfig[eventId] || 3;
+  
   const updateSeats = (eventId, val) => {
     if (!currentUser) return; 
     const newSeats = parseInt(val);
@@ -299,6 +295,7 @@ function App() {
     });
     saveToCloud(newEvents);
   };
+
   const handleAddEvent = () => {
     if (!newEventTitle || !newEventDate) return alert("Please fill in title and date");
     const newEvent = { id: generateId(), title: newEventTitle, date: newEventDate, location: newEventLocation, hasPLC: newEventHasPLC, attendees: [], drivers: [] };
@@ -317,26 +314,113 @@ function App() {
       if (event.id !== eventId) return event;
       let updatedAttendees = [...event.attendees].filter(a => (a.id || a) !== currentUser.id);
       if (newStatus) updatedAttendees.push({ id: currentUser.id, status: newStatus });
-      return { ...event, attendees: updatedAttendees };
+      
+      const isLocked = checkRosterUnlock(event.date);
+      if (isLocked) {
+        // Late Change: Just update attendance list, DO NOT Recalc Rosters
+        return { ...event, attendees: updatedAttendees };
+      }
+      return autoAssignByDistance({ ...event, attendees: updatedAttendees });
     });
     saveToCloud(newEvents);
   };
+
+  // --- MODIFIED TOGGLE DRIVING (SURGICAL UPDATE) ---
   const toggleDriving = (eventId, direction) => {
     if (!currentUser) return; 
     const newEvents = events.map(event => {
       if (event.id !== eventId) return event;
+      
+      const isLocked = checkRosterUnlock(event.date);
       let updatedDrivers = [...event.drivers];
+      
       const alreadyDriving = updatedDrivers.find(d => d.userId === currentUser.id && d.direction === direction);
+
       if (alreadyDriving) {
+        // REMOVE DRIVER
         updatedDrivers = updatedDrivers.filter(d => d !== alreadyDriving);
+        // Note: Passengers become orphans implicitly. We don't auto-reassign if locked.
       } else {
+        // ADD DRIVER
         if (updatedDrivers.filter(d => d.direction === direction).length >= MAX_DRIVERS) return event;
-        updatedDrivers.push({ userId: currentUser.id, name: currentUser.name, seats: getSeats(eventId), direction: direction, passengers: [] });
+        
+        const newDriver = { 
+            userId: currentUser.id, 
+            name: currentUser.name, 
+            seats: getSeats(eventId), 
+            direction: direction, 
+            passengers: [] 
+        };
+
+        // --- SURGICAL LOGIC FOR LOCKED ROSTERS ---
+        if (isLocked) {
+            // Check if there are other drivers
+            const existingDrivers = updatedDrivers.filter(d => d.direction === direction);
+            
+            if (existingDrivers.length === 0) {
+                // SCENARIO 2: No drivers existed. Use standard algorithm.
+                updatedDrivers.push(newDriver);
+                const intermediate = { ...event, drivers: updatedDrivers };
+                return autoAssignByDistance(intermediate);
+            } else {
+                // SCENARIO 1: Existing drivers. Surgical update.
+                
+                // 1. Move Own Kid
+                const ownKid = INITIAL_USERS.find(u => u.id === currentUser.id);
+                // Is kid in another car?
+                updatedDrivers.forEach(d => {
+                    if (d.direction === direction && d.passengers.includes(ownKid.kidName)) {
+                        d.passengers = d.passengers.filter(p => p !== ownKid.kidName);
+                    }
+                });
+                // Add to new car
+                if (ownKid && event.attendees.some(a => (a.id || a) === ownKid.id && a.status === 'Attending')) {
+                    newDriver.passengers.push(ownKid.kidName);
+                }
+
+                // 2. Find Orphans (Attending but not in any passenger list for this direction)
+                const attendingList = event.attendees
+                    .filter(a => a.status === 'Attending')
+                    .map(a => INITIAL_USERS.find(u => u.id === (a.id || a)))
+                    .filter(u => u); // valid users
+
+                const orphans = attendingList.filter(kid => {
+                    // Check if kid is in ANY driver's passenger list for this direction
+                    const inCar = updatedDrivers.some(d => d.direction === direction && d.passengers.includes(kid.kidName));
+                    const isOwnKid = kid.id === currentUser.id;
+                    return !inCar && !isOwnKid;
+                });
+
+                // 3. Fill remaining seats with orphans
+                // Calculate capacity: Input Seats + 1 (if own kid is present)
+                let capacity = newDriver.seats;
+                if (newDriver.passengers.includes(ownKid.kidName)) capacity += 1;
+
+                orphans.forEach(orphan => {
+                    if (newDriver.passengers.length < capacity) {
+                        newDriver.passengers.push(orphan.kidName);
+                    }
+                });
+
+                updatedDrivers.push(newDriver);
+            }
+        } else {
+            // NOT LOCKED: Standard Add
+            updatedDrivers.push(newDriver);
+        }
       }
-      return { ...event, drivers: updatedDrivers };
+
+      const resultEvent = { ...event, drivers: updatedDrivers };
+      
+      // If unlocked, run full sort. If locked, we already did surgical update or standard sort above.
+      if (!isLocked) {
+          return autoAssignByDistance(resultEvent);
+      }
+      return resultEvent;
     });
     saveToCloud(newEvents);
   };
+
   const cancelAllDrives = (eventId) => {
     if (!currentUser) return; 
     const newEvents = events.map(event => {
@@ -465,11 +549,11 @@ function App() {
                             )}
                             <div className="stub-summary">
                                 <div className="summary-item">
-                                    <span className="summary-badge kids">{attendingCount} Scouts Going</span>
+                                    <span className="summary-badge kids">{attendingCount} Going</span>
                                     {notAttendingCount > 0 && <span className="summary-badge missing">{notAttendingCount} Not Going</span>}
                                 </div>
-                                <div className="summary-item"><span className="summary-badge to">Driving To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
-                                <div className="summary-item"><span className="summary-badge from">Driving From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
+                                <div className="summary-item"><span className="summary-badge to">To:</span> {driversToList.length > 0 ? driversToList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
+                                <div className="summary-item"><span className="summary-badge from">From:</span> {driversFromList.length > 0 ? driversFromList.join(', ') : <span style={{color:'#9ca3af'}}>None</span>}</div>
                             </div>
                         </div>
                         {!isAdmin && (
@@ -550,14 +634,14 @@ function App() {
                                                 <span className="drive-label">→ Driving TO? {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}</span>
                                                 <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
                                             </div>
-                                            {drivingTo && <div className="drive-status-text">Thanks for volunteering!</div>}
+                                            {drivingTo && <div className="drive-status-text">You are driving.</div>}
                                         </div>
                                         <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
                                             <div className="drive-card-header">
                                                 <span className="drive-label">← Driving FROM?</span>
                                                 <div className="checkbox-custom">{drivingFrom && <Icons.Check />}</div>
                                             </div>
-                                            {drivingFrom && <div className="drive-status-text">Thanks for volunteering!</div>}
+                                            {drivingFrom && <div className="drive-status-text">You are driving.</div>}
                                         </div>
                                     </div>
                                     <div className="seats-row">
