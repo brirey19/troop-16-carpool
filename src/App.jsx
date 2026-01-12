@@ -10,7 +10,7 @@ const Icons = {
   MapPin: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
   Check: () => <svg className="icon-success" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
   X: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>,
-  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
+  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
   ChevronDown: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>,
   ChevronUp: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>,
   Alert: () => <svg className="icon" style={{color: '#854d0e'}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
@@ -66,6 +66,14 @@ const checkRosterUnlock = (eventDateStr) => {
   return new Date(ctString) >= target;
 };
 
+// Check if event is Today or Future
+const isFutureEvent = (dateStr) => {
+  const eventDate = new Date(dateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Start of today (Midnight)
+  return eventDate >= today;
+};
+
 // --- DIFF REPORT ---
 const generateDiffReport = (localList, cloudList) => {
   let diffs = [];
@@ -91,6 +99,8 @@ function App() {
   const [events, setEvents] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Polling State
   const [incomingEvents, setIncomingEvents] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [diffReport, setDiffReport] = useState([]); 
@@ -104,7 +114,7 @@ function App() {
   const [newEventDate, setNewEventDate] = useState('');
   const [newEventHasPLC, setNewEventHasPLC] = useState(false);
 
-  // --- LOGIC: STANDARD ASSIGNMENT ---
+  // --- LOGIC: ASSIGNMENT ---
   const autoAssignByDistance = useCallback((event) => {
     if (!event) return event;
     const currentDrivers = event.drivers || [];
@@ -205,6 +215,7 @@ function App() {
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
+        // Load ALL data into state (preserve history for Save)
         const hydrated = data.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
@@ -254,13 +265,10 @@ function App() {
   const saveToCloud = (newEvents) => {
     const processedEvents = newEvents.map(ev => {
       const isLocked = checkRosterUnlock(ev.date);
-      // NOTE: We trust the event passed in is already structured correctly by toggleDriving
-      // If unlocked, we recalc to be safe. If locked, we assume the handler did the surgery.
       if (!isLocked) {
         const calculated = autoAssignByDistance(ev);
         return { ...calculated, lockedRoster: calculated.drivers };
       } else {
-        // If locked, we save the current state as the new lock
         return { ...ev, lockedRoster: ev.drivers };
       }
     });
@@ -270,6 +278,7 @@ function App() {
       .map(e => ({ ...e, id: String(e.id) }));
 
     const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
+    
     setEvents(sortedEvents); 
     setUpdateAvailable(false);
     setSaving(true);
@@ -317,7 +326,6 @@ function App() {
       
       const isLocked = checkRosterUnlock(event.date);
       if (isLocked) {
-        // Late Change: Just update attendance list, DO NOT Recalc Rosters
         return { ...event, attendees: updatedAttendees };
       }
       return autoAssignByDistance({ ...event, attendees: updatedAttendees });
@@ -325,7 +333,6 @@ function App() {
     saveToCloud(newEvents);
   };
 
-  // --- MODIFIED TOGGLE DRIVING (SURGICAL UPDATE) ---
   const toggleDriving = (eventId, direction) => {
     if (!currentUser) return; 
     const newEvents = events.map(event => {
@@ -337,11 +344,8 @@ function App() {
       const alreadyDriving = updatedDrivers.find(d => d.userId === currentUser.id && d.direction === direction);
 
       if (alreadyDriving) {
-        // REMOVE DRIVER
         updatedDrivers = updatedDrivers.filter(d => d !== alreadyDriving);
-        // Note: Passengers become orphans implicitly. We don't auto-reassign if locked.
       } else {
-        // ADD DRIVER
         if (updatedDrivers.filter(d => d.direction === direction).length >= MAX_DRIVERS) return event;
         
         const newDriver = { 
@@ -352,47 +356,35 @@ function App() {
             passengers: [] 
         };
 
-        // --- SURGICAL LOGIC FOR LOCKED ROSTERS ---
         if (isLocked) {
-            // Check if there are other drivers
             const existingDrivers = updatedDrivers.filter(d => d.direction === direction);
             
             if (existingDrivers.length === 0) {
-                // SCENARIO 2: No drivers existed. Use standard algorithm.
                 updatedDrivers.push(newDriver);
                 const intermediate = { ...event, drivers: updatedDrivers };
                 return autoAssignByDistance(intermediate);
             } else {
-                // SCENARIO 1: Existing drivers. Surgical update.
-                
-                // 1. Move Own Kid
                 const ownKid = INITIAL_USERS.find(u => u.id === currentUser.id);
-                // Is kid in another car?
                 updatedDrivers.forEach(d => {
                     if (d.direction === direction && d.passengers.includes(ownKid.kidName)) {
                         d.passengers = d.passengers.filter(p => p !== ownKid.kidName);
                     }
                 });
-                // Add to new car
                 if (ownKid && event.attendees.some(a => (a.id || a) === ownKid.id && a.status === 'Attending')) {
                     newDriver.passengers.push(ownKid.kidName);
                 }
 
-                // 2. Find Orphans (Attending but not in any passenger list for this direction)
                 const attendingList = event.attendees
                     .filter(a => a.status === 'Attending')
                     .map(a => INITIAL_USERS.find(u => u.id === (a.id || a)))
-                    .filter(u => u); // valid users
+                    .filter(u => u); 
 
                 const orphans = attendingList.filter(kid => {
-                    // Check if kid is in ANY driver's passenger list for this direction
                     const inCar = updatedDrivers.some(d => d.direction === direction && d.passengers.includes(kid.kidName));
                     const isOwnKid = kid.id === currentUser.id;
                     return !inCar && !isOwnKid;
                 });
 
-                // 3. Fill remaining seats with orphans
-                // Calculate capacity: Input Seats + 1 (if own kid is present)
                 let capacity = newDriver.seats;
                 if (newDriver.passengers.includes(ownKid.kidName)) capacity += 1;
 
@@ -405,14 +397,11 @@ function App() {
                 updatedDrivers.push(newDriver);
             }
         } else {
-            // NOT LOCKED: Standard Add
             updatedDrivers.push(newDriver);
         }
       }
 
       const resultEvent = { ...event, drivers: updatedDrivers };
-      
-      // If unlocked, run full sort. If locked, we already did surgical update or standard sort above.
       if (!isLocked) {
           return autoAssignByDistance(resultEvent);
       }
@@ -488,7 +477,7 @@ function App() {
                 </div>
             )}
             
-            {events.map(event => {
+            {events.filter(e => isFutureEvent(e.date)).map(event => {
                 const isExpanded = expandedEvents[event.id];
                 
                 const myAttendance = currentUser ? event.attendees.find(a => (a.id || a) === currentUser.id) : null;
