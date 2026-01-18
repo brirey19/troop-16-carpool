@@ -10,7 +10,7 @@ const Icons = {
   MapPin: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
   Check: () => <svg className="icon-success" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
   X: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>,
-  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
+  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
   ChevronDown: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>,
   ChevronUp: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>,
   Alert: () => <svg className="icon" style={{color: '#854d0e'}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
@@ -643,7 +643,11 @@ function App() {
                                     </div>
                                     <div className="seats-row">
                                         <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}><Icons.CarSide /> Available Seats (Other Kids):</div>
-                                        <input type="number" min="1" max="8" value={getSeats(event.id)} onChange={(e) => updateSeats(event.id, e.target.value)} />
+                                        <div className="seat-stepper">
+                                            <button className="stepper-btn" onClick={() => updateSeats(event.id, Math.max(1, getSeats(event.id) - 1))}>−</button>
+                                            <span className="stepper-val">{getSeats(event.id)}</span>
+                                            <button className="stepper-btn" onClick={() => updateSeats(event.id, Math.min(8, getSeats(event.id) + 1))}>+</button>
+                                        </div>
                                     </div>
                                 </>
                             )}

@@ -314,3 +314,57 @@ button.primary-btn:hover { background: var(--primary-dark); }
 /* Utility */
 .icon { width: 20px; height: 20px; }
 .icon-success { width: 16px; height: 16px; stroke-width: 3; }
+
+/* SEAT STEPPER (Mobile Optimized) */
+.seats-row { 
+  border: 1px solid var(--border); 
+  border-radius: 8px; 
+  padding: 0.75rem 1rem; 
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between; 
+  margin-top: 1rem; 
+  background: #fafafa; 
+}
+
+.seat-stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.stepper-btn {
+  width: 40px; /* Large touch target */
+  height: 40px;
+  border-radius: 6px;
+  border: none;
+  background: #f3f4f6;
+  color: var(--primary);
+  font-size: 1.25rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+  user-select: none; /* Prevent text selection on rapid taps */
+  touch-action: manipulation; /* Optimizes for touch */
+}
+
+.stepper-btn:active {
+  background: #dbeafe;
+  color: var(--primary-dark);
+}
+
+.stepper-val {
+  font-size: 1.1rem;
+  font-weight: 700;
+  width: 30px;
+  text-align: center;
+  color: var(--text-main);
+  font-variant-numeric: tabular-nums; /* Prevents jitter when number changes */
+}
