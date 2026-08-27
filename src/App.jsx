@@ -16,33 +16,12 @@ const Icons = {
   Alert: () => <svg className="icon" style={{color: '#854d0e'}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
   Clock: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
   Sync: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>,
-  Flag: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-8a2 2 0 012-2h14a2 2 0 012 2v8l-6-3-6 3-6-3-6 3zM3 21h18M5 5h14a2 2 0 012 2v3a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" /></svg>
+  Flag: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-8a2 2 0 012-2h14a2 2 0 012 2v8l-6-3-6 3-6-3-6 3zM3 21h18M5 5h14a2 2 0 012 2v3a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 01-2-2V7a2 2 0 012-2z" /></svg>
 };
-
-// --- DATA ---
-const INITIAL_USERS = [
-  { id: 1, name: 'Block Family', kidName: 'Ethan', address: '559 Jackson Ave', lat: 41.8967, lng: -87.8176 },
-  { id: 2, name: 'Irey Family', kidName: 'David', address: '739 Monroe Ave', lat: 41.8996, lng: -87.8152 },
-  { id: 3, name: 'Grabowski Family', kidName: 'Kurt', address: '1311 Park Ave', lat: 41.9067, lng: -87.8185 },
-  { id: 4, name: 'Kyrias-Gann Family', kidName: 'James', address: '534 Ashland Ave', lat: 41.8954, lng: -87.8228 },
-  { id: 5, name: 'Murphy Family', kidName: 'Oliver', address: '718 Park Ave', lat: 41.8981, lng: -87.8182 },
-  { id: 6, name: 'Sandhu Family', kidName: 'Armaan', address: '45 Franklin Ave', lat: 41.8872, lng: -87.8239 },
-  { id: 7, name: 'Vroustouris Family', kidName: 'Harrison', address: '19 Gale Avenue', lat: 41.8864, lng: -87.8130 },
-];
 
 const MAX_DRIVERS = 2; 
 
 // --- HELPERS ---
-const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return 9999; 
-  const R = 6371; 
-  const dLat = (lat2 - lat1) * (Math.PI / 180);
-  const dLon = (lon2 - lon1) * (Math.PI / 180);
-  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c; 
-};
-
 const getPLCTime = (dateStr) => {
   const d = new Date(dateStr);
   d.setHours(d.getHours() - 1);
@@ -90,15 +69,10 @@ const generateDiffReport = (localList, cloudList) => {
 };
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(() => {
-    const savedId = localStorage.getItem('troop16_family_id');
-    if (savedId) {
-      return INITIAL_USERS.find(u => u.id === parseInt(savedId)) || null;
-    }
-    return null;
-  }); 
-
-  const [showSelector, setShowSelector] = useState(!currentUser);
+  const [users, setUsers] = useState([]);
+  const [distanceMatrix, setDistanceMatrix] = useState({});
+  const [currentUser, setCurrentUser] = useState(null); 
+  const [showSelector, setShowSelector] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false); 
   
   // Data State
@@ -125,8 +99,8 @@ function App() {
   const [newEventHasPLC, setNewEventHasPLC] = useState(false);
 
   // --- LOGIC: ASSIGNMENT ---
-  const autoAssignByDistance = useCallback((event) => {
-    if (!event) return event;
+  const autoAssignByDistance = useCallback((event, currentUsers = users, distMat = distanceMatrix) => {
+    if (!event || currentUsers.length === 0) return event;
     const currentDrivers = event.drivers || [];
     const currentAttendees = event.attendees || [];
 
@@ -152,7 +126,7 @@ function App() {
       const driversInDir = updatedDrivers.filter(d => d.direction === direction);
       if (driversInDir.length === 0) return; 
 
-      const allKidsInDir = INITIAL_USERS.filter(u => attendeeIds.includes(u.id));
+      const allKidsInDir = currentUsers.filter(u => attendeeIds.includes(u.id));
       const totalKids = allKidsInDir.length;
 
       const D1 = driversInDir[0];
@@ -185,10 +159,16 @@ function App() {
         
         let edges = [];
         remainingKids.forEach(kid => {
-            const u1 = INITIAL_USERS.find(u => u.id === D1.userId);
-            const u2 = INITIAL_USERS.find(u => u.id === D2.userId);
-            if (u1 && D1.passengers.length < d1Target) edges.push({ kid, driver: D1, dist: calculateDistance(kid.lat, kid.lng, u1.lat, u1.lng) });
-            if (u2 && D2.passengers.length < d2Target) edges.push({ kid, driver: D2, dist: calculateDistance(kid.lat, kid.lng, u2.lat, u2.lng) });
+            const u1 = currentUsers.find(u => u.id === D1.userId);
+            const u2 = currentUsers.find(u => u.id === D2.userId);
+            if (u1 && D1.passengers.length < d1Target) {
+                const dist = (distMat[kid.id] && distMat[kid.id][u1.id]) !== undefined ? distMat[kid.id][u1.id] : 9999;
+                edges.push({ kid, driver: D1, dist });
+            }
+            if (u2 && D2.passengers.length < d2Target) {
+                const dist = (distMat[kid.id] && distMat[kid.id][u2.id]) !== undefined ? distMat[kid.id][u2.id] : 9999;
+                edges.push({ kid, driver: D2, dist });
+            }
         });
         edges.sort((a, b) => a.dist - b.dist);
         
@@ -215,7 +195,7 @@ function App() {
       }
     });
     return { ...event, drivers: updatedDrivers };
-  }, [seatConfig, currentUser]); 
+  }, [seatConfig, currentUser, users, distanceMatrix]); 
 
   // --- API & POLLING ---
   const fetchEvents = async () => {
@@ -224,13 +204,15 @@ function App() {
       const data = await res.json();
       
       if (Array.isArray(data)) {
-        return { events: data.filter(e => e.id).map(e => ({...e, id: String(e.id)})), templates: [] };
+        return { events: data.filter(e => e.id).map(e => ({...e, id: String(e.id)})), templates: [], users: [], distanceMatrix: {} };
       }
       
       const safeEvents = (data.events || []).filter(e => e.id).map(e => ({...e, id: String(e.id)}));
       return { 
         events: safeEvents.sort((a, b) => new Date(a.date) - new Date(b.date)), 
-        templates: data.templates || [] 
+        templates: data.templates || [],
+        users: data.users || [],
+        distanceMatrix: data.distanceMatrix || {}
       };
     } catch (err) {
       console.error("Error fetching", err);
@@ -241,15 +223,29 @@ function App() {
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
+        setUsers(data.users);
+        setDistanceMatrix(data.distanceMatrix);
+        setTemplates(data.templates);
+        
+        // Resolve user locally once users are loaded from backend
+        const savedId = localStorage.getItem('troop16_family_id');
+        let loadedUser = null;
+        if (savedId) {
+            loadedUser = data.users.find(u => u.id === parseInt(savedId));
+            if (loadedUser) {
+                setCurrentUser(loadedUser);
+                setShowSelector(false);
+            }
+        }
+
         const hydrated = data.events.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
                 return { ...ev, drivers: ev.lockedRoster };
             }
-            return autoAssignByDistance(ev);
+            return autoAssignByDistance(ev, data.users, data.distanceMatrix);
         });
         setEvents(hydrated);
-        setTemplates(data.templates);
         setLoading(false);
       }
     });
@@ -262,13 +258,15 @@ function App() {
         if (!newData || isSavingRef.current) return;
         
         setTemplates(newData.templates);
+        setUsers(newData.users);
+        setDistanceMatrix(newData.distanceMatrix);
 
         const hydratedNewData = newData.events.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
                 return { ...ev, drivers: ev.lockedRoster };
             }
-            return autoAssignByDistance(ev);
+            return autoAssignByDistance(ev, newData.users, newData.distanceMatrix);
         });
         const report = generateDiffReport(events, hydratedNewData);
         if (report.length > 0) {
@@ -451,7 +449,7 @@ function App() {
                 const intermediate = { ...event, drivers: updatedDrivers };
                 return autoAssignByDistance(intermediate);
             } else {
-                const ownKid = INITIAL_USERS.find(u => u.id === currentUser.id);
+                const ownKid = users.find(u => u.id === currentUser.id);
                 updatedDrivers.forEach(d => {
                     if (d.direction === direction && d.passengers.includes(ownKid.kidName)) {
                         d.passengers = d.passengers.filter(p => p !== ownKid.kidName);
@@ -463,7 +461,7 @@ function App() {
 
                 const attendingList = event.attendees
                     .filter(a => ['Attending', 'Attending (PLC)'].includes(a.status))
-                    .map(a => INITIAL_USERS.find(u => u.id === (a.id || a)))
+                    .map(a => users.find(u => u.id === (a.id || a)))
                     .filter(u => u); 
 
                 let targetStatuses = [];
@@ -569,13 +567,13 @@ function App() {
                             <select value={currentUser ? currentUser.id : ""} onChange={(e) => {
                                   if (e.target.value === "") return;
                                   const selectedId = parseInt(e.target.value);
-                                  setCurrentUser(INITIAL_USERS.find(u => u.id === selectedId));
+                                  setCurrentUser(users.find(u => u.id === selectedId));
                                   localStorage.setItem('troop16_family_id', selectedId);
                                   setExpandedEvents({}); 
                                   setShowSelector(false);
                                 }} style={{flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #ddd'}}>
                                 <option value="" disabled>Select your family...</option>
-                                {INITIAL_USERS.map(u => <option key={u.id} value={u.id}>{u.name} ({u.kidName})</option>)}
+                                {users.map(u => <option key={u.id} value={u.id}>{u.name} ({u.kidName})</option>)}
                             </select>
                             {currentUser && (
                                 <button 
@@ -661,7 +659,6 @@ function App() {
                 const toDriverCount = event.drivers.filter(d => d.direction.startsWith('TO')).length;
                 const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
                 
-                // Max caps setup
                 const canDriveTo = drivingTo || toDriverCount < MAX_DRIVERS;
                 const canDriveToPLC = drivingToPLC || event.drivers.filter(d => d.direction === 'TO_PLC').length < 1;
                 const canDriveToReg = drivingToReg || event.drivers.filter(d => d.direction === 'TO_REGULAR').length < 1;
@@ -673,7 +670,7 @@ function App() {
                 const driversToList = rosterEvent.drivers.filter(d => d.direction.startsWith('TO')).map(d => d.direction === 'TO_PLC' ? `${d.name} (PLC)` : d.name);
                 const driversFromList = rosterEvent.drivers.filter(d => d.direction === 'FROM').map(d => d.name);
                 
-                const attendingList = INITIAL_USERS.filter(u => 
+                const attendingList = users.filter(u => 
                     event.attendees.some(a => (a.id || a) === u.id && ['Attending', 'Attending (PLC)'].includes(a.status))
                 );
 
