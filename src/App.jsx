@@ -103,7 +103,7 @@ function App() {
   
   // Data State
   const [events, setEvents] = useState([]); 
-  const [templates, setTemplates] = useState([]); // NEW
+  const [templates, setTemplates] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -130,19 +130,34 @@ function App() {
     const currentDrivers = event.drivers || [];
     const currentAttendees = event.attendees || [];
 
-    const directions = ['TO', 'FROM'];
     let updatedDrivers = currentDrivers.map(d => ({ ...d, passengers: [] }));
     
-    const attendingIds = currentAttendees
-      .filter(a => a.status === 'Attending')
-      .map(a => a.id || a);
+    // Dynamically set up directions based on whether this event splits kids (PLC)
+    const directionConfigs = [
+        {
+            direction: event.hasPLC ? 'TO_PLC' : 'TO',
+            attendeeIds: event.hasPLC 
+                ? currentAttendees.filter(a => a.status === 'Attending PLC').map(a => a.id || a)
+                : currentAttendees.filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status)).map(a => a.id || a)
+        },
+        {
+            direction: event.hasPLC ? 'TO_REGULAR' : null,
+            attendeeIds: event.hasPLC 
+                ? currentAttendees.filter(a => ['Attending Regular', 'Attending'].includes(a.status)).map(a => a.id || a)
+                : null
+        },
+        {
+            direction: 'FROM',
+            attendeeIds: currentAttendees.filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status)).map(a => a.id || a)
+        }
+    ].filter(d => d.direction !== null);
 
-    const allKidsInDir = INITIAL_USERS.filter(u => attendingIds.includes(u.id));
-    const totalKids = allKidsInDir.length;
-
-    directions.forEach(direction => {
+    directionConfigs.forEach(({ direction, attendeeIds }) => {
       const driversInDir = updatedDrivers.filter(d => d.direction === direction);
       if (driversInDir.length === 0) return; 
+
+      const allKidsInDir = INITIAL_USERS.filter(u => attendeeIds.includes(u.id));
+      const totalKids = allKidsInDir.length;
 
       const D1 = driversInDir[0];
       const D2 = driversInDir.length > 1 ? driversInDir[1] : null;
@@ -212,7 +227,6 @@ function App() {
       const res = await fetch(API_URL);
       const data = await res.json();
       
-      // Backward compatibility logic
       if (Array.isArray(data)) {
         return { events: data.filter(e => e.id).map(e => ({...e, id: String(e.id)})), templates: [] };
       }
@@ -251,7 +265,6 @@ function App() {
       fetchEvents().then(newData => {
         if (!newData || isSavingRef.current) return;
         
-        // Silently sync templates
         setTemplates(newData.templates);
 
         const hydratedNewData = newData.events.map(ev => {
@@ -334,7 +347,7 @@ function App() {
         const t = templates.find(t => String(t.id) === String(tId));
         if (t) {
             setNewEventTitle(t.title || "");
-            setNewEventDate(t.date || ""); // Preserves the exact time saved
+            setNewEventDate(t.date || ""); 
             setNewEventLocation(t.location || "");
             setNewEventHasPLC(t.hasPLC || false);
         }
@@ -349,7 +362,7 @@ function App() {
         id: generateId(),
         templateName: tName,
         title: newEventTitle,
-        date: newEventDate, // Saves the time (and arbitrary date) to be modified later
+        date: newEventDate, 
         location: newEventLocation,
         hasPLC: newEventHasPLC
     };
@@ -382,8 +395,6 @@ function App() {
     if (!newEventTitle || !newEventDate) return alert("Please fill in title and date");
     const newEvent = { id: generateId(), title: newEventTitle, date: newEventDate, location: newEventLocation, hasPLC: newEventHasPLC, attendees: [], drivers: [] };
     saveToCloud([...events, newEvent]);
-    
-    // Reset Form
     setSelectedTemplateId("");
     setNewEventTitle(''); setNewEventDate(''); setNewEventLocation(''); setNewEventHasPLC(false);
   };
@@ -422,7 +433,13 @@ function App() {
       if (alreadyDriving) {
         updatedDrivers = updatedDrivers.filter(d => d !== alreadyDriving);
       } else {
-        if (updatedDrivers.filter(d => d.direction === direction).length >= MAX_DRIVERS) return event;
+        // Enforce MAX_DRIVERS explicitly across ALL 'TO' directions
+        if (direction.startsWith('TO')) {
+            const toDriverCount = updatedDrivers.filter(d => d.direction.startsWith('TO')).length;
+            if (toDriverCount >= MAX_DRIVERS) return event;
+        } else if (direction === 'FROM') {
+            if (updatedDrivers.filter(d => d.direction === 'FROM').length >= MAX_DRIVERS) return event;
+        }
         
         const newDriver = { 
             userId: currentUser.id, 
@@ -446,19 +463,27 @@ function App() {
                         d.passengers = d.passengers.filter(p => p !== ownKid.kidName);
                     }
                 });
-                if (ownKid && event.attendees.some(a => (a.id || a) === ownKid.id && a.status === 'Attending')) {
+                if (ownKid && event.attendees.some(a => (a.id || a) === ownKid.id && ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status))) {
                     newDriver.passengers.push(ownKid.kidName);
                 }
 
                 const attendingList = event.attendees
-                    .filter(a => a.status === 'Attending')
+                    .filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status))
                     .map(a => INITIAL_USERS.find(u => u.id === (a.id || a)))
                     .filter(u => u); 
+
+                // Isolate orphans dynamically based on the direction the driver selected
+                let targetStatuses = [];
+                if (direction === 'TO_PLC') targetStatuses = ['Attending PLC'];
+                else if (direction === 'TO_REGULAR') targetStatuses = ['Attending Regular', 'Attending'];
+                else if (direction === 'TO') targetStatuses = ['Attending', 'Attending Regular', 'Attending PLC'];
+                else if (direction === 'FROM') targetStatuses = ['Attending', 'Attending PLC', 'Attending Regular'];
 
                 const orphans = attendingList.filter(kid => {
                     const inCar = updatedDrivers.some(d => d.direction === direction && d.passengers.includes(kid.kidName));
                     const isOwnKid = kid.id === currentUser.id;
-                    return !inCar && !isOwnKid;
+                    const hasRightStatus = event.attendees.some(a => (a.id || a) === kid.id && targetStatuses.includes(a.status));
+                    return !inCar && !isOwnKid && hasRightStatus;
                 });
 
                 let capacity = newDriver.seats;
@@ -629,28 +654,34 @@ function App() {
                     : autoAssignByDistance(event);
 
                 const drivingTo = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO') : null;
+                const drivingToPLC = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO_PLC') : null;
+                const drivingToReg = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'TO_REGULAR') : null;
                 const drivingFrom = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'FROM') : null;
                 
                 const intentKey = currentUser ? `${event.id}_${currentUser.id}` : null;
-                const isDrivingReal = !!drivingTo || !!drivingFrom;
+                const isDrivingReal = !!drivingTo || !!drivingToPLC || !!drivingToReg || !!drivingFrom;
                 const isDrivingIntent = drivingIntents[intentKey];
                 
                 const isDrivingYes = isDrivingReal || isDrivingIntent === true;
+                const isDrivingNo = !isDrivingReal && isDrivingIntent === false;
                 const showMissingInfoWarning = isDrivingYes && !isDrivingReal;
 
-                const toDriverCount = event.drivers.filter(d => d.direction === 'TO').length;
+                const toDriverCount = event.drivers.filter(d => d.direction.startsWith('TO')).length;
                 const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
+                
                 const canDriveTo = drivingTo || toDriverCount < MAX_DRIVERS;
+                const canDriveToPLC = drivingToPLC || toDriverCount < MAX_DRIVERS;
+                const canDriveToReg = drivingToReg || toDriverCount < MAX_DRIVERS;
                 const canDriveFrom = drivingFrom || fromDriverCount < MAX_DRIVERS;
 
-                const attendingCount = event.attendees.filter(a => a.status === 'Attending').length;
+                const attendingCount = event.attendees.filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status)).length;
                 const notAttendingCount = event.attendees.filter(a => a.status === 'Not Attending').length;
 
-                const driversToList = rosterEvent.drivers.filter(d => d.direction === 'TO').map(d => d.name);
+                const driversToList = rosterEvent.drivers.filter(d => d.direction.startsWith('TO')).map(d => d.direction === 'TO_PLC' ? `${d.name} (PLC)` : d.name);
                 const driversFromList = rosterEvent.drivers.filter(d => d.direction === 'FROM').map(d => d.name);
                 
                 const attendingList = INITIAL_USERS.filter(u => 
-                    event.attendees.some(a => (a.id || a) === u.id && a.status === 'Attending')
+                    event.attendees.some(a => (a.id || a) === u.id && ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status))
                 );
 
                 return (
@@ -711,7 +742,14 @@ function App() {
                                     <div className="action-toggle-group">
                                         <label>{currentUser.kidName} Going? {event.hasPLC && <span style={{color:'#d97706'}}>(PLC)</span>}</label>
                                         <div className="att-btn-group">
-                                            <button className={`att-btn ${status === 'Attending' ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Attending' ? null : 'Attending')}><Icons.Check /></button>
+                                            {event.hasPLC ? (
+                                                <>
+                                                    <button style={{fontSize:'0.75rem', fontWeight:'bold', padding:'0 8px'}} className={`att-btn ${status === 'Attending PLC' ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Attending PLC' ? null : 'Attending PLC')}>PLC</button>
+                                                    <button style={{fontSize:'0.75rem', fontWeight:'bold', padding:'0 8px'}} className={`att-btn ${status === 'Attending Regular' ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Attending Regular' ? null : 'Attending Regular')}>Reg.</button>
+                                                </>
+                                            ) : (
+                                                <button className={`att-btn ${['Attending', 'Attending Regular', 'Attending PLC'].includes(status) ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, ['Attending', 'Attending Regular', 'Attending PLC'].includes(status) ? null : 'Attending')}><Icons.Check /></button>
+                                            )}
                                             <button className={`att-btn ${status === 'Not Attending' ? 'active-red' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Not Attending' ? null : 'Not Attending')}><Icons.X /></button>
                                         </div>
                                     </div>
@@ -721,22 +759,28 @@ function App() {
                                             <button 
                                                 className={`att-btn ${isDrivingYes ? 'active-green' : ''}`} 
                                                 onClick={() => {
-                                                    if (isDrivingYes) {
-                                                        if (isDrivingReal) {
-                                                            if(window.confirm("Are you confirming you can no longer drive for this event?")) {
-                                                                cancelAllDrives(event.id);
-                                                                setDrivingIntents(prev => ({...prev, [intentKey]: false}));
-                                                            }
-                                                        } else {
-                                                            setDrivingIntents(prev => ({...prev, [intentKey]: false}));
-                                                        }
-                                                    } else {
+                                                    if (!isDrivingYes) {
                                                         setDrivingIntents(prev => ({...prev, [intentKey]: true}));
                                                         toggleExpand(event.id, true);
                                                     }
                                                 }}
                                             >
                                                 <Icons.Check />
+                                            </button>
+                                            <button 
+                                                className={`att-btn ${isDrivingNo ? 'active-red' : ''}`} 
+                                                onClick={() => {
+                                                    if (isDrivingReal) {
+                                                        if(window.confirm("Are you confirming you can no longer drive for this event?")) {
+                                                            cancelAllDrives(event.id);
+                                                            setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                        }
+                                                    } else {
+                                                        setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                    }
+                                                }}
+                                            >
+                                                <Icons.X />
                                             </button>
                                         </div>
                                     </div>
@@ -756,11 +800,13 @@ function App() {
                             <div className="attendee-title">Who is going?</div>
                             <div className="attendee-grid">
                                 {attendingList.map(u => {
-                                    const hasRideTo = rosterEvent.drivers.some(d => d.direction === 'TO' && d.passengers.includes(u.kidName));
+                                    const uStatus = event.attendees.find(a => (a.id || a) === u.id)?.status;
+                                    const isPLC = uStatus === 'Attending PLC';
+                                    const hasRideTo = rosterEvent.drivers.some(d => d.direction.startsWith('TO') && d.passengers.includes(u.kidName));
                                     const hasRideFrom = rosterEvent.drivers.some(d => d.direction === 'FROM' && d.passengers.includes(u.kidName));
                                     return (
                                         <div key={u.id} className="attendee-chip">
-                                            {u.kidName}
+                                            {u.kidName} {isPLC && <span style={{fontSize:'0.7rem', color:'#d97706', fontWeight:'bold'}}>(PLC)</span>}
                                             {isRosterVisible && (
                                                 <div className="meta-item" style={{marginLeft: '8px', fontSize:'0.75rem', color: '#666'}}>
                                                     To <div className={`status-dot ${hasRideTo ? 'dot-success' : 'dot-warn'}`}></div>
@@ -784,20 +830,35 @@ function App() {
                                             <Icons.Alert /> Please select if you are driving To, From, or Both:
                                         </div>
                                     )}
-                                    <div className="drive-grid">
-                                        <div className={`drive-card ${drivingTo ? 'selected' : ''} ${!canDriveTo ? 'disabled' : ''}`} onClick={() => canDriveTo && toggleDriving(event.id, 'TO')}>
-                                            <div className="drive-card-header">
-                                                <span className="drive-label">→ Driving TO? {event.hasPLC && <div style={{fontSize:'0.75rem', color:'#d97706'}}>Arrive by {getPLCTime(event.date)}</div>}</span>
-                                                <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
+                                    <div className="drive-grid" style={{ gridTemplateColumns: event.hasPLC ? 'repeat(auto-fit, minmax(140px, 1fr))' : '1fr 1fr' }}>
+                                        {event.hasPLC ? (
+                                            <>
+                                                <div className={`drive-card ${drivingToPLC ? 'selected' : ''} ${!canDriveToPLC ? 'disabled' : ''}`} onClick={() => canDriveToPLC && toggleDriving(event.id, 'TO_PLC')}>
+                                                    <div className="drive-card-header">
+                                                        <span className="drive-label">→ To PLC (6:30)?</span>
+                                                        <div className="checkbox-custom">{drivingToPLC && <Icons.Check />}</div>
+                                                    </div>
+                                                </div>
+                                                <div className={`drive-card ${drivingToReg ? 'selected' : ''} ${!canDriveToReg ? 'disabled' : ''}`} onClick={() => canDriveToReg && toggleDriving(event.id, 'TO_REGULAR')}>
+                                                    <div className="drive-card-header">
+                                                        <span className="drive-label">→ To Regular (7:30)?</span>
+                                                        <div className="checkbox-custom">{drivingToReg && <Icons.Check />}</div>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        ) : (
+                                            <div className={`drive-card ${drivingTo ? 'selected' : ''} ${!canDriveTo ? 'disabled' : ''}`} onClick={() => canDriveTo && toggleDriving(event.id, 'TO')}>
+                                                <div className="drive-card-header">
+                                                    <span className="drive-label">→ Driving TO?</span>
+                                                    <div className="checkbox-custom">{drivingTo && <Icons.Check />}</div>
+                                                </div>
                                             </div>
-                                            {drivingTo && <div className="drive-status-text">Thanks for volunteering!</div>}
-                                        </div>
+                                        )}
                                         <div className={`drive-card ${drivingFrom ? 'selected' : ''} ${!canDriveFrom ? 'disabled' : ''}`} onClick={() => canDriveFrom && toggleDriving(event.id, 'FROM')}>
                                             <div className="drive-card-header">
                                                 <span className="drive-label">← Driving FROM?</span>
                                                 <div className="checkbox-custom">{drivingFrom && <Icons.Check />}</div>
                                             </div>
-                                            {drivingFrom && <div className="drive-status-text">Thanks for volunteering!</div>}
                                         </div>
                                     </div>
                                     <div className="seats-row">
@@ -828,13 +889,33 @@ function App() {
                                         <strong>Roster Locked:</strong> Changes made now will not update the list below.
                                       </div>
                                     )}
-                                    <div className="roster-group"><div className="roster-tag">TO EVENT</div>
-                                        {rosterEvent.drivers.filter(d => d.direction === 'TO').map(d => (
-                                            <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
-                                                <div className="car-info"><div className="driver-name">🚗 {d.name}</div><div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div></div>
-                                            </div>
-                                        ))}
-                                    </div>
+                                    {event.hasPLC && rosterEvent.drivers.filter(d => d.direction === 'TO_PLC').length > 0 && (
+                                        <div className="roster-group"><div className="roster-tag">TO PLC (6:30)</div>
+                                            {rosterEvent.drivers.filter(d => d.direction === 'TO_PLC').map(d => (
+                                                <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
+                                                    <div className="car-info"><div className="driver-name">🚗 {d.name}</div><div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {event.hasPLC && rosterEvent.drivers.filter(d => d.direction === 'TO_REGULAR').length > 0 && (
+                                        <div className="roster-group"><div className="roster-tag">TO REGULAR (7:30)</div>
+                                            {rosterEvent.drivers.filter(d => d.direction === 'TO_REGULAR').map(d => (
+                                                <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
+                                                    <div className="car-info"><div className="driver-name">🚗 {d.name}</div><div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {!event.hasPLC && (
+                                        <div className="roster-group"><div className="roster-tag">TO EVENT</div>
+                                            {rosterEvent.drivers.filter(d => d.direction === 'TO').map(d => (
+                                                <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
+                                                    <div className="car-info"><div className="driver-name">🚗 {d.name}</div><div className="passenger-text">{d.passengers.join(', ') || 'Empty'}</div></div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
                                     <div className="roster-group"><div className="roster-tag">FROM EVENT</div>
                                         {rosterEvent.drivers.filter(d => d.direction === 'FROM').map(d => (
                                             <div key={d.userId} className={`car-card ${currentUser && d.userId === currentUser.id ? 'is-me' : ''}`}>
