@@ -8,9 +8,9 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyMVQuK3L7EmoZOY1lPlPp8
 // --- ICONS ---
 const Icons = {
   MapPin: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>,
-  Check: () => <svg className="icon-success" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>,
+  Check: () => <svg className="icon-success" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>,
   X: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>,
-  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
+  CarSide: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10l2-2h10l2 2v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-1H8v1a1 1 0 01-1 1H5a1 1 0 01-1-1v-6z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 10h14" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 14a2 2 0 100 4 2 2 0 000-4z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 14a2 2 0 100 4 2 2 0 000-4z" /></svg>,
   ChevronDown: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>,
   ChevronUp: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>,
   Alert: () => <svg className="icon" style={{color: '#854d0e'}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
@@ -502,10 +502,12 @@ function App() {
                 const drivingFrom = currentUser ? event.drivers.find(d => d.userId === currentUser.id && d.direction === 'FROM') : null;
                 
                 const intentKey = currentUser ? `${event.id}_${currentUser.id}` : null;
-                const isDrivingReal = drivingTo || drivingFrom;
+                const isDrivingReal = !!drivingTo || !!drivingFrom;
                 const isDrivingIntent = drivingIntents[intentKey];
-                const toggleState = !!isDrivingReal || !!isDrivingIntent;
-                const showMissingInfoWarning = toggleState && !isDrivingReal;
+                
+                const isDrivingYes = isDrivingReal || isDrivingIntent === true;
+                const isDrivingNo = !isDrivingReal && isDrivingIntent === false;
+                const showMissingInfoWarning = isDrivingYes && !isDrivingReal;
 
                 const toDriverCount = event.drivers.filter(d => d.direction === 'TO').length;
                 const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
@@ -537,7 +539,27 @@ function App() {
                                 </>
                             ) : (
                                 <>
-                                    <h2>{event.title}</h2>
+                                    <h2>
+                                        {event.title}
+                                        {isDrivingReal && (
+                                            <span style={{
+                                                marginLeft: '10px', 
+                                                fontSize: '0.75rem', 
+                                                fontWeight: '700',
+                                                backgroundColor: 'var(--success-bg)', 
+                                                color: 'var(--success-text)', 
+                                                border: '1px solid var(--success-border)',
+                                                padding: '2px 8px', 
+                                                borderRadius: '12px',
+                                                verticalAlign: 'middle',
+                                                display: 'inline-flex',
+                                                alignItems: 'center',
+                                                gap: '4px'
+                                            }}>
+                                                🚗 Driving
+                                            </span>
+                                        )}
+                                    </h2>
                                     <div className="meta-row">
                                         <div className="meta-item"><Icons.MapPin />{event.location || 'No Location'}</div>
                                     </div>
@@ -566,12 +588,21 @@ function App() {
                                     </div>
                                     <div className="action-toggle-group">
                                         <label>I can drive</label>
-                                        <label className="toggle-switch">
-                                            <input type="checkbox" checked={toggleState} onChange={(e) => {
-                                                if (e.target.checked) {
-                                                    setDrivingIntents(prev => ({...prev, [intentKey]: true}));
-                                                    toggleExpand(event.id, true);
-                                                } else {
+                                        <div className="att-btn-group">
+                                            <button 
+                                                className={`att-btn ${isDrivingYes ? 'active-green' : ''}`} 
+                                                onClick={() => {
+                                                    if (!isDrivingYes) {
+                                                        setDrivingIntents(prev => ({...prev, [intentKey]: true}));
+                                                        toggleExpand(event.id, true);
+                                                    }
+                                                }}
+                                            >
+                                                <Icons.Check />
+                                            </button>
+                                            <button 
+                                                className={`att-btn ${isDrivingNo ? 'active-red' : ''}`} 
+                                                onClick={() => {
                                                     if (isDrivingReal) {
                                                         if(window.confirm("Stop driving?")) {
                                                             cancelAllDrives(event.id);
@@ -580,10 +611,11 @@ function App() {
                                                     } else {
                                                         setDrivingIntents(prev => ({...prev, [intentKey]: false}));
                                                     }
-                                                }
-                                            }} />
-                                            <span className="slider"></span>
-                                        </label>
+                                                }}
+                                            >
+                                                <Icons.X />
+                                            </button>
+                                        </div>
                                     </div>
                                 </>
                                 )}
