@@ -132,23 +132,19 @@ function App() {
 
     let updatedDrivers = currentDrivers.map(d => ({ ...d, passengers: [] }));
     
-    // Dynamically set up directions based on whether this event splits kids (PLC)
+    // Ensure "Attending" and "Attending (PLC)" pool together properly for FROM
     const directionConfigs = [
         {
             direction: event.hasPLC ? 'TO_PLC' : 'TO',
-            attendeeIds: event.hasPLC 
-                ? currentAttendees.filter(a => a.status === 'Attending PLC').map(a => a.id || a)
-                : currentAttendees.filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status)).map(a => a.id || a)
+            attendeeIds: currentAttendees.filter(a => event.hasPLC ? a.status === 'Attending (PLC)' : ['Attending', 'Attending (PLC)'].includes(a.status)).map(a => a.id || a)
         },
         {
             direction: event.hasPLC ? 'TO_REGULAR' : null,
-            attendeeIds: event.hasPLC 
-                ? currentAttendees.filter(a => ['Attending Regular', 'Attending'].includes(a.status)).map(a => a.id || a)
-                : null
+            attendeeIds: event.hasPLC ? currentAttendees.filter(a => a.status === 'Attending').map(a => a.id || a) : null
         },
         {
             direction: 'FROM',
-            attendeeIds: currentAttendees.filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status)).map(a => a.id || a)
+            attendeeIds: currentAttendees.filter(a => ['Attending', 'Attending (PLC)'].includes(a.status)).map(a => a.id || a)
         }
     ].filter(d => d.direction !== null);
 
@@ -433,13 +429,11 @@ function App() {
       if (alreadyDriving) {
         updatedDrivers = updatedDrivers.filter(d => d !== alreadyDriving);
       } else {
-        // Enforce MAX_DRIVERS explicitly across ALL 'TO' directions
-        if (direction.startsWith('TO')) {
-            const toDriverCount = updatedDrivers.filter(d => d.direction.startsWith('TO')).length;
-            if (toDriverCount >= MAX_DRIVERS) return event;
-        } else if (direction === 'FROM') {
-            if (updatedDrivers.filter(d => d.direction === 'FROM').length >= MAX_DRIVERS) return event;
-        }
+        // Driver Caps
+        if (direction === 'TO_PLC' && updatedDrivers.filter(d => d.direction === 'TO_PLC').length >= 1) return event;
+        if (direction === 'TO_REGULAR' && updatedDrivers.filter(d => d.direction === 'TO_REGULAR').length >= 1) return event;
+        if (direction === 'TO' && updatedDrivers.filter(d => d.direction === 'TO').length >= MAX_DRIVERS) return event;
+        if (direction === 'FROM' && updatedDrivers.filter(d => d.direction === 'FROM').length >= MAX_DRIVERS) return event;
         
         const newDriver = { 
             userId: currentUser.id, 
@@ -463,21 +457,20 @@ function App() {
                         d.passengers = d.passengers.filter(p => p !== ownKid.kidName);
                     }
                 });
-                if (ownKid && event.attendees.some(a => (a.id || a) === ownKid.id && ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status))) {
+                if (ownKid && event.attendees.some(a => (a.id || a) === ownKid.id && ['Attending', 'Attending (PLC)'].includes(a.status))) {
                     newDriver.passengers.push(ownKid.kidName);
                 }
 
                 const attendingList = event.attendees
-                    .filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status))
+                    .filter(a => ['Attending', 'Attending (PLC)'].includes(a.status))
                     .map(a => INITIAL_USERS.find(u => u.id === (a.id || a)))
                     .filter(u => u); 
 
-                // Isolate orphans dynamically based on the direction the driver selected
                 let targetStatuses = [];
-                if (direction === 'TO_PLC') targetStatuses = ['Attending PLC'];
-                else if (direction === 'TO_REGULAR') targetStatuses = ['Attending Regular', 'Attending'];
-                else if (direction === 'TO') targetStatuses = ['Attending', 'Attending Regular', 'Attending PLC'];
-                else if (direction === 'FROM') targetStatuses = ['Attending', 'Attending PLC', 'Attending Regular'];
+                if (direction === 'TO_PLC') targetStatuses = ['Attending (PLC)'];
+                else if (direction === 'TO_REGULAR') targetStatuses = ['Attending'];
+                else if (direction === 'TO') targetStatuses = ['Attending', 'Attending (PLC)'];
+                else if (direction === 'FROM') targetStatuses = ['Attending', 'Attending (PLC)'];
 
                 const orphans = attendingList.filter(kid => {
                     const inCar = updatedDrivers.some(d => d.direction === direction && d.passengers.includes(kid.kidName));
@@ -669,19 +662,20 @@ function App() {
                 const toDriverCount = event.drivers.filter(d => d.direction.startsWith('TO')).length;
                 const fromDriverCount = event.drivers.filter(d => d.direction === 'FROM').length;
                 
+                // Max caps setup
                 const canDriveTo = drivingTo || toDriverCount < MAX_DRIVERS;
-                const canDriveToPLC = drivingToPLC || toDriverCount < MAX_DRIVERS;
-                const canDriveToReg = drivingToReg || toDriverCount < MAX_DRIVERS;
+                const canDriveToPLC = drivingToPLC || event.drivers.filter(d => d.direction === 'TO_PLC').length < 1;
+                const canDriveToReg = drivingToReg || event.drivers.filter(d => d.direction === 'TO_REGULAR').length < 1;
                 const canDriveFrom = drivingFrom || fromDriverCount < MAX_DRIVERS;
 
-                const attendingCount = event.attendees.filter(a => ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status)).length;
+                const attendingCount = event.attendees.filter(a => ['Attending', 'Attending (PLC)'].includes(a.status)).length;
                 const notAttendingCount = event.attendees.filter(a => a.status === 'Not Attending').length;
 
                 const driversToList = rosterEvent.drivers.filter(d => d.direction.startsWith('TO')).map(d => d.direction === 'TO_PLC' ? `${d.name} (PLC)` : d.name);
                 const driversFromList = rosterEvent.drivers.filter(d => d.direction === 'FROM').map(d => d.name);
                 
                 const attendingList = INITIAL_USERS.filter(u => 
-                    event.attendees.some(a => (a.id || a) === u.id && ['Attending', 'Attending PLC', 'Attending Regular'].includes(a.status))
+                    event.attendees.some(a => (a.id || a) === u.id && ['Attending', 'Attending (PLC)'].includes(a.status))
                 );
 
                 return (
@@ -744,11 +738,11 @@ function App() {
                                         <div className="att-btn-group">
                                             {event.hasPLC ? (
                                                 <>
-                                                    <button style={{fontSize:'0.75rem', fontWeight:'bold', padding:'0 8px'}} className={`att-btn ${status === 'Attending PLC' ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Attending PLC' ? null : 'Attending PLC')}>PLC</button>
-                                                    <button style={{fontSize:'0.75rem', fontWeight:'bold', padding:'0 8px'}} className={`att-btn ${status === 'Attending Regular' ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Attending Regular' ? null : 'Attending Regular')}>Reg.</button>
+                                                    <button style={{fontSize:'0.75rem', fontWeight:'bold', padding:'0 8px'}} className={`att-btn ${status === 'Attending (PLC)' ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Attending (PLC)' ? null : 'Attending (PLC)')}>PLC</button>
+                                                    <button style={{fontSize:'0.75rem', fontWeight:'bold', padding:'0 8px'}} className={`att-btn ${status === 'Attending' ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Attending' ? null : 'Attending')}>Reg.</button>
                                                 </>
                                             ) : (
-                                                <button className={`att-btn ${['Attending', 'Attending Regular', 'Attending PLC'].includes(status) ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, ['Attending', 'Attending Regular', 'Attending PLC'].includes(status) ? null : 'Attending')}><Icons.Check /></button>
+                                                <button className={`att-btn ${['Attending', 'Attending (PLC)'].includes(status) ? 'active-green' : ''}`} onClick={() => toggleAttendance(event.id, ['Attending', 'Attending (PLC)'].includes(status) ? null : 'Attending')}><Icons.Check /></button>
                                             )}
                                             <button className={`att-btn ${status === 'Not Attending' ? 'active-red' : ''}`} onClick={() => toggleAttendance(event.id, status === 'Not Attending' ? null : 'Not Attending')}><Icons.X /></button>
                                         </div>
@@ -801,7 +795,7 @@ function App() {
                             <div className="attendee-grid">
                                 {attendingList.map(u => {
                                     const uStatus = event.attendees.find(a => (a.id || a) === u.id)?.status;
-                                    const isPLC = uStatus === 'Attending PLC';
+                                    const isPLC = uStatus === 'Attending (PLC)';
                                     const hasRideTo = rosterEvent.drivers.some(d => d.direction.startsWith('TO') && d.passengers.includes(u.kidName));
                                     const hasRideFrom = rosterEvent.drivers.some(d => d.direction === 'FROM' && d.passengers.includes(u.kidName));
                                     return (
