@@ -73,7 +73,6 @@ const isFutureEvent = (dateStr) => {
   return eventDate >= today;
 };
 
-// --- DIFF REPORT ---
 const generateDiffReport = (localList, cloudList) => {
   let diffs = [];
   if (localList.length !== cloudList.length) diffs.push(`Event count mismatch`);
@@ -102,8 +101,10 @@ function App() {
   const [showSelector, setShowSelector] = useState(!currentUser);
   const [isAdmin, setIsAdmin] = useState(false); 
   
-  // State
+  // Data State
   const [events, setEvents] = useState([]); 
+  const [templates, setTemplates] = useState([]); // NEW
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const isSavingRef = useRef(false);
@@ -116,6 +117,8 @@ function App() {
   const [expandedEvents, setExpandedEvents] = useState({});
   const [drivingIntents, setDrivingIntents] = useState({});
 
+  // Admin Form State
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventLocation, setNewEventLocation] = useState('');
   const [newEventDate, setNewEventDate] = useState('');
@@ -208,13 +211,17 @@ function App() {
     try {
       const res = await fetch(API_URL);
       const data = await res.json();
-      if (!Array.isArray(data)) return null;
       
-      const validEvents = data
-        .filter(e => e.id && String(e.id).trim() !== "")
-        .map(e => ({ ...e, id: String(e.id) }));
-
-      return validEvents.sort((a, b) => new Date(a.date) - new Date(b.date));
+      // Backward compatibility logic
+      if (Array.isArray(data)) {
+        return { events: data.filter(e => e.id).map(e => ({...e, id: String(e.id)})), templates: [] };
+      }
+      
+      const safeEvents = (data.events || []).filter(e => e.id).map(e => ({...e, id: String(e.id)}));
+      return { 
+        events: safeEvents.sort((a, b) => new Date(a.date) - new Date(b.date)), 
+        templates: data.templates || [] 
+      };
     } catch (err) {
       console.error("Error fetching", err);
       return null;
@@ -224,7 +231,7 @@ function App() {
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
-        const hydrated = data.map(ev => {
+        const hydrated = data.events.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
                 return { ...ev, drivers: ev.lockedRoster };
@@ -232,6 +239,7 @@ function App() {
             return autoAssignByDistance(ev);
         });
         setEvents(hydrated);
+        setTemplates(data.templates);
         setLoading(false);
       }
     });
@@ -242,7 +250,11 @@ function App() {
       if (isSavingRef.current || loading) return; 
       fetchEvents().then(newData => {
         if (!newData || isSavingRef.current) return;
-        const hydratedNewData = newData.map(ev => {
+        
+        // Silently sync templates
+        setTemplates(newData.templates);
+
+        const hydratedNewData = newData.events.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (isLocked && ev.lockedRoster) {
                 return { ...ev, drivers: ev.lockedRoster };
@@ -270,7 +282,7 @@ function App() {
     }
   };
 
-  const saveToCloud = (newEvents) => {
+  const saveToCloud = (newEvents, newTemplates = templates) => {
     isSavingRef.current = true;
     setSaving(true);
 
@@ -291,9 +303,12 @@ function App() {
     const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
     
     setEvents(sortedEvents); 
+    setTemplates(newTemplates);
     setUpdateAvailable(false);
     
-    fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(sortedEvents) })
+    const payload = { events: sortedEvents, templates: newTemplates };
+    
+    fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(payload) })
     .then(() => {
       isSavingRef.current = false;
       setSaving(false);
@@ -305,11 +320,50 @@ function App() {
     });
   };
 
+  // --- TEMPLATE HANDLERS ---
+  const handleTemplateSelect = (e) => {
+    const tId = e.target.value;
+    setSelectedTemplateId(tId);
+    
+    if (tId === "") {
+        setNewEventTitle("");
+        setNewEventDate("");
+        setNewEventLocation("");
+        setNewEventHasPLC(false);
+    } else {
+        const t = templates.find(t => String(t.id) === String(tId));
+        if (t) {
+            setNewEventTitle(t.title || "");
+            setNewEventDate(t.date || ""); // Preserves the exact time saved
+            setNewEventLocation(t.location || "");
+            setNewEventHasPLC(t.hasPLC || false);
+        }
+    }
+  };
+
+  const handleSaveAsTemplate = () => {
+    const tName = window.prompt("Enter a short name for this Template (e.g. 'Standard Troop Meeting'):", newEventTitle || "New Template");
+    if (!tName) return;
+    
+    const newTemplate = {
+        id: generateId(),
+        templateName: tName,
+        title: newEventTitle,
+        date: newEventDate, // Saves the time (and arbitrary date) to be modified later
+        location: newEventLocation,
+        hasPLC: newEventHasPLC
+    };
+    
+    const updatedTemplates = [...templates, newTemplate];
+    saveToCloud(events, updatedTemplates);
+    setSelectedTemplateId(newTemplate.id);
+    alert(`Template "${tName}" saved successfully!`);
+  };
+
   // --- HANDLERS ---
   const toggleExpand = (eventId, forceState) => {
     setExpandedEvents(prev => ({ ...prev, [eventId]: forceState !== undefined ? forceState : !prev[eventId] }));
   };
-  
   const getSeats = (eventId) => seatConfig[eventId] || 4;
   
   const updateSeats = (eventId, val) => {
@@ -328,6 +382,9 @@ function App() {
     if (!newEventTitle || !newEventDate) return alert("Please fill in title and date");
     const newEvent = { id: generateId(), title: newEventTitle, date: newEventDate, location: newEventLocation, hasPLC: newEventHasPLC, attendees: [], drivers: [] };
     saveToCloud([...events, newEvent]);
+    
+    // Reset Form
+    setSelectedTemplateId("");
     setNewEventTitle(''); setNewEventDate(''); setNewEventLocation(''); setNewEventHasPLC(false);
   };
   const handleDeleteEvent = (eventId) => {
@@ -518,6 +575,20 @@ function App() {
             {isAdmin && (
                 <div className="admin-create-panel">
                     <h3>+ Create New Event</h3>
+                    
+                    <div className="form-row" style={{marginBottom: '15px'}}>
+                        <select 
+                            value={selectedTemplateId} 
+                            onChange={handleTemplateSelect}
+                            style={{flex: 1, padding: '10px', borderRadius: '6px', border: '1px solid var(--primary)', backgroundColor: '#eff6ff', fontWeight: '600', color: 'var(--primary-dark)', width: '100%'}}
+                        >
+                            <option value="">-- Custom Event (Blank) --</option>
+                            {templates.map(t => (
+                                <option key={t.id} value={t.id}>Template: {t.templateName}</option>
+                            ))}
+                        </select>
+                    </div>
+
                     <div className="form-row">
                         <input type="text" placeholder="Event Title" value={newEventTitle} onChange={e => setNewEventTitle(e.target.value)} />
                         <input type="datetime-local" value={newEventDate} onChange={e => setNewEventDate(e.target.value)} />
@@ -528,7 +599,18 @@ function App() {
                             <input type="checkbox" checked={newEventHasPLC} onChange={e => setNewEventHasPLC(e.target.checked)} />
                             <label style={{fontSize:'0.85rem'}}>Has PLC?</label>
                         </div>
-                        <button className="primary-btn" onClick={handleAddEvent}>Create</button>
+                    </div>
+                    
+                    <div className="form-row" style={{ marginTop: '15px', display: 'flex', gap: '10px' }}>
+                        <button 
+                            onClick={handleSaveAsTemplate} 
+                            style={{flex: 1, background: '#e5e7eb', color: '#374151', border: 'none', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 600}}
+                        >
+                            Save as Template
+                        </button>
+                        <button className="primary-btn" onClick={handleAddEvent} style={{flex: 1.5}}>
+                            Publish Event
+                        </button>
                     </div>
                 </div>
             )}
