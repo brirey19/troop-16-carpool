@@ -91,7 +91,15 @@ const generateDiffReport = (localList, cloudList) => {
 };
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(null); 
+  const [currentUser, setCurrentUser] = useState(() => {
+    const savedId = localStorage.getItem('troop16_family_id');
+    if (savedId) {
+      return INITIAL_USERS.find(u => u.id === parseInt(savedId)) || null;
+    }
+    return null;
+  }); 
+
+  const [showSelector, setShowSelector] = useState(!currentUser);
   const [isAdmin, setIsAdmin] = useState(false); 
   
   // State
@@ -142,10 +150,7 @@ function App() {
       const d2Kid = D2 ? allKidsInDir.find(k => k.id === D2.userId) : null;
 
       let S1 = getSeatsForDriver(D1);
-      if (d1Kid) S1 += 1;
-
       let S2 = D2 ? getSeatsForDriver(D2) : 0;
-      if (D2 && d2Kid) S2 += 1;
 
       if (totalKids <= S1) {
         D1.passengers = allKidsInDir.map(k => k.kidName);
@@ -156,11 +161,14 @@ function App() {
       else if (D2) {
         if (d1Kid) D1.passengers.push(d1Kid.kidName);
         if (d2Kid) D2.passengers.push(d2Kid.kidName);
+        
         let remainingKids = allKidsInDir.filter(k => (!d1Kid || k.id !== d1Kid.id) && (!d2Kid || k.id !== d2Kid.id));
         const half = Math.ceil(totalKids / 2);
+        
         let d1Target = Math.min(half, S1);
         let d2Target = Math.min(totalKids - d1Target, S2);
         if (d2Target < totalKids - d1Target) d1Target = Math.min(totalKids - d2Target, S1);
+        
         let edges = [];
         remainingKids.forEach(kid => {
             const u1 = INITIAL_USERS.find(u => u.id === D1.userId);
@@ -169,6 +177,7 @@ function App() {
             if (u2 && D2.passengers.length < d2Target) edges.push({ kid, driver: D2, dist: calculateDistance(kid.lat, kid.lng, u2.lat, u2.lng) });
         });
         edges.sort((a, b) => a.dist - b.dist);
+        
         const assignedIds = new Set();
         edges.forEach(edge => {
             if (assignedIds.has(edge.kid.id)) return; 
@@ -178,6 +187,7 @@ function App() {
                 assignedIds.add(edge.kid.id);
             }
         });
+        
         remainingKids.filter(k => !assignedIds.has(k.id)).forEach(kid => {
             if (D1.passengers.length < S1) D1.passengers.push(kid.kidName);
             else if (D2.passengers.length < S2) D2.passengers.push(kid.kidName);
@@ -299,7 +309,8 @@ function App() {
   const toggleExpand = (eventId, forceState) => {
     setExpandedEvents(prev => ({ ...prev, [eventId]: forceState !== undefined ? forceState : !prev[eventId] }));
   };
-  const getSeats = (eventId) => seatConfig[eventId] || 3;
+  
+  const getSeats = (eventId) => seatConfig[eventId] || 4;
   
   const updateSeats = (eventId, val) => {
     if (!currentUser) return; 
@@ -394,7 +405,6 @@ function App() {
                 });
 
                 let capacity = newDriver.seats;
-                if (newDriver.passengers.includes(ownKid.kidName)) capacity += 1;
 
                 orphans.forEach(orphan => {
                     if (newDriver.passengers.length < capacity) {
@@ -453,18 +463,56 @@ function App() {
       </header>
 
       <div className="container">
-        {!loading && (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '40px 20px', color: '#6b7280', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <div style={{ animation: 'spin 1.5s linear infinite', display: 'inline-block', marginBottom: '12px' }}>
+              <Icons.Sync />
+            </div>
+            <p style={{ margin: 0, fontWeight: '500' }}>Loading schedule data...</p>
+            <style>{`@keyframes spin { 100% { transform: rotate(360deg); } }`}</style>
+          </div>
+        ) : (
         <>
             <div className="user-selector">
-                <label style={{fontSize: '0.85rem', fontWeight: 600, color: '#666'}}>Select Family:</label>
-                <select value={currentUser ? currentUser.id : ""} onChange={(e) => {
-                      if (e.target.value === "") return;
-                      setCurrentUser(INITIAL_USERS.find(u => u.id === parseInt(e.target.value)));
-                      setExpandedEvents({}); 
-                    }} style={{flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #ddd'}}>
-                    <option value="" disabled>Select your family...</option>
-                    {INITIAL_USERS.map(u => <option key={u.id} value={u.id}>{u.name} ({u.kidName})</option>)}
-                </select>
+                {!showSelector && currentUser ? (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                        <div>
+                            <span style={{ fontSize: '0.85rem', color: '#666' }}>Currently acting as:</span><br/>
+                            <strong style={{ fontSize: '1rem', color: 'var(--text-main)' }}>{currentUser.name}</strong> <span style={{color: '#666', fontSize: '0.9rem'}}>({currentUser.kidName})</span>
+                        </div>
+                        <button 
+                            onClick={() => setShowSelector(true)}
+                            style={{ background: '#e5e7eb', color: '#374151', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}
+                        >
+                            Change
+                        </button>
+                    </div>
+                ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '8px' }}>
+                        <label style={{fontSize: '0.85rem', fontWeight: 600, color: '#666'}}>Select Family:</label>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <select value={currentUser ? currentUser.id : ""} onChange={(e) => {
+                                  if (e.target.value === "") return;
+                                  const selectedId = parseInt(e.target.value);
+                                  setCurrentUser(INITIAL_USERS.find(u => u.id === selectedId));
+                                  localStorage.setItem('troop16_family_id', selectedId);
+                                  setExpandedEvents({}); 
+                                  setShowSelector(false);
+                                }} style={{flex: 1, padding: '8px', borderRadius: '6px', border: '1px solid #ddd'}}>
+                                <option value="" disabled>Select your family...</option>
+                                {INITIAL_USERS.map(u => <option key={u.id} value={u.id}>{u.name} ({u.kidName})</option>)}
+                            </select>
+                            {currentUser && (
+                                <button 
+                                    onClick={() => setShowSelector(false)}
+                                    style={{ background: 'transparent', color: '#6b7280', border: '1px solid #d1d5db', padding: '6px 12px', borderRadius: '6px', fontSize: '0.8rem', cursor: 'pointer' }}
+                                >
+                                    Cancel
+                                </button>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {isAdmin && (
@@ -506,7 +554,6 @@ function App() {
                 const isDrivingIntent = drivingIntents[intentKey];
                 
                 const isDrivingYes = isDrivingReal || isDrivingIntent === true;
-                const isDrivingNo = !isDrivingReal && isDrivingIntent === false;
                 const showMissingInfoWarning = isDrivingYes && !isDrivingReal;
 
                 const toDriverCount = event.drivers.filter(d => d.direction === 'TO').length;
@@ -592,7 +639,16 @@ function App() {
                                             <button 
                                                 className={`att-btn ${isDrivingYes ? 'active-green' : ''}`} 
                                                 onClick={() => {
-                                                    if (!isDrivingYes) {
+                                                    if (isDrivingYes) {
+                                                        if (isDrivingReal) {
+                                                            if(window.confirm("Are you confirming you can no longer drive for this event?")) {
+                                                                cancelAllDrives(event.id);
+                                                                setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                            }
+                                                        } else {
+                                                            setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                        }
+                                                    } else {
                                                         setDrivingIntents(prev => ({...prev, [intentKey]: true}));
                                                         toggleExpand(event.id, true);
                                                     }
@@ -600,27 +656,16 @@ function App() {
                                             >
                                                 <Icons.Check />
                                             </button>
-                                            <button 
-                                                className={`att-btn ${isDrivingNo ? 'active-red' : ''}`} 
-                                                onClick={() => {
-                                                    if (isDrivingReal) {
-                                                        if(window.confirm("Stop driving?")) {
-                                                            cancelAllDrives(event.id);
-                                                            setDrivingIntents(prev => ({...prev, [intentKey]: false}));
-                                                        }
-                                                    } else {
-                                                        setDrivingIntents(prev => ({...prev, [intentKey]: false}));
-                                                    }
-                                                }}
-                                            >
-                                                <Icons.X />
-                                            </button>
                                         </div>
                                     </div>
                                 </>
                                 )}
                             </div>
                         )}
+                    </div>
+
+                    <div className="expand-trigger" onClick={() => toggleExpand(event.id)} style={{ borderTop: 'none' }}>
+                        {isExpanded ? <>Hide Details <Icons.ChevronUp /></> : <>View Details <Icons.ChevronDown /></>}
                     </div>
 
                     {isExpanded && (
@@ -674,7 +719,7 @@ function App() {
                                         </div>
                                     </div>
                                     <div className="seats-row">
-                                        <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}><Icons.CarSide /> Available Seats (Other Kids):</div>
+                                        <div style={{display:'flex', alignItems:'center', gap:'10px', color:'#374151', fontWeight: 500}}><Icons.CarSide /> Available Seats (including your scout):</div>
                                         <div className="seat-stepper">
                                             <button className="stepper-btn" onClick={() => updateSeats(event.id, Math.max(1, getSeats(event.id) - 1))}>−</button>
                                             <span className="stepper-val">{getSeats(event.id)}</span>
@@ -720,20 +765,18 @@ function App() {
                         </div>
                     </div>
                     )}
-                    <div className="expand-trigger" onClick={() => toggleExpand(event.id)}>
-                        {isExpanded ? <>Hide Details <Icons.ChevronUp /></> : <>View Details <Icons.ChevronDown /></>}
-                    </div>
                 </div>
                 );
             })}
+            
+            <div className="admin-footer">
+                <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:'5px', fontSize:'0.85rem'}}>
+                    <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
+                    Admin Mode
+                </div>
+            </div>
         </>
         )}
-        <div className="admin-footer">
-            <div style={{display:'flex', alignItems:'center', gap:'5px', fontSize:'0.85rem'}}>
-                <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
-                Admin Mode
-            </div>
-        </div>
       </div>
     </div>
   );
