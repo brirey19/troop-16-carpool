@@ -656,7 +656,6 @@ function App() {
                 const isDrivingIntent = drivingIntents[intentKey];
                 
                 const isDrivingYes = isDrivingReal || isDrivingIntent === true;
-                const isDrivingNo = !isDrivingReal && isDrivingIntent === false;
                 const showMissingInfoWarning = isDrivingYes && !isDrivingReal;
 
                 const toDriverCount = event.drivers.filter(d => d.direction.startsWith('TO')).length;
@@ -734,7 +733,7 @@ function App() {
                                 {currentUser && (
                                 <>
                                     <div className="action-toggle-group">
-                                        <label>{currentUser.kidName} Going? {event.hasPLC && <span style={{color:'#d97706'}}>(PLC)</span>}</label>
+                                        <label>{currentUser.kidName} Going?</label>
                                         <div className="att-btn-group">
                                             {event.hasPLC ? (
                                                 <>
@@ -753,28 +752,22 @@ function App() {
                                             <button 
                                                 className={`att-btn ${isDrivingYes ? 'active-green' : ''}`} 
                                                 onClick={() => {
-                                                    if (!isDrivingYes) {
+                                                    if (isDrivingYes) {
+                                                        if (isDrivingReal) {
+                                                            if(window.confirm("Are you confirming you can no longer drive for this event?")) {
+                                                                cancelAllDrives(event.id);
+                                                                setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                            }
+                                                        } else {
+                                                            setDrivingIntents(prev => ({...prev, [intentKey]: false}));
+                                                        }
+                                                    } else {
                                                         setDrivingIntents(prev => ({...prev, [intentKey]: true}));
                                                         toggleExpand(event.id, true);
                                                     }
                                                 }}
                                             >
                                                 <Icons.Check />
-                                            </button>
-                                            <button 
-                                                className={`att-btn ${isDrivingNo ? 'active-red' : ''}`} 
-                                                onClick={() => {
-                                                    if (isDrivingReal) {
-                                                        if(window.confirm("Are you confirming you can no longer drive for this event?")) {
-                                                            cancelAllDrives(event.id);
-                                                            setDrivingIntents(prev => ({...prev, [intentKey]: false}));
-                                                        }
-                                                    } else {
-                                                        setDrivingIntents(prev => ({...prev, [intentKey]: false}));
-                                                    }
-                                                }}
-                                            >
-                                                <Icons.X />
                                             </button>
                                         </div>
                                     </div>
