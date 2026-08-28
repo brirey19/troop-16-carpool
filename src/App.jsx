@@ -82,6 +82,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const isSavingRef = useRef(false);
+  const initialLoadDone = useRef(false);
 
   const [incomingEvents, setIncomingEvents] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -227,15 +228,17 @@ function App() {
         setDistanceMatrix(data.distanceMatrix);
         setTemplates(data.templates);
         
-        // Resolve user locally once users are loaded from backend
-        const savedId = localStorage.getItem('troop16_family_id');
-        let loadedUser = null;
-        if (savedId) {
-            loadedUser = data.users.find(u => u.id === parseInt(savedId));
-            if (loadedUser) {
-                setCurrentUser(loadedUser);
-                setShowSelector(false);
+        // ONLY resolve user locally on the very first load
+        if (!initialLoadDone.current) {
+            const savedId = localStorage.getItem('troop16_family_id');
+            if (savedId) {
+                const loadedUser = data.users.find(u => u.id === parseInt(savedId));
+                if (loadedUser) {
+                    setCurrentUser(loadedUser);
+                    setShowSelector(false);
+                }
             }
+            initialLoadDone.current = true;
         }
 
         const hydrated = data.events.map(ev => {
@@ -249,7 +252,7 @@ function App() {
         setLoading(false);
       }
     });
-  }, [autoAssignByDistance]); 
+  }, [autoAssignByDistance]);
 
   useEffect(() => {
     const interval = setInterval(() => {
