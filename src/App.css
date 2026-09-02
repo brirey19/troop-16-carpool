@@ -368,3 +368,36 @@ button.primary-btn:hover { background: var(--primary-dark); }
   color: var(--text-main);
   font-variant-numeric: tabular-nums; /* Prevents jitter when number changes */
 }
+
+/* --- MOBILE OVERFLOW FIXES --- */
+
+/* Allow the main header sections to stack on very small screens */
+.event-header {
+  flex-wrap: wrap; 
+  max-width: 100%;
+}
+
+/* The magic flexbox fix: min-width: 0 allows the container to shrink below its content size */
+.header-info {
+  flex: 1 1 0%;
+  min-width: 0; 
+  overflow-wrap: break-word;
+}
+
+/* Force long lists of driver names to wrap to the next line */
+.summary-item {
+  white-space: normal !important;
+  word-wrap: break-word;
+  line-height: 1.4;
+}
+
+/* Ensure the action buttons never get squished */
+.header-actions {
+  flex-shrink: 0;
+}
+
+/* Prevent long event titles from blowing out the width */
+.event-header h2 {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
