@@ -924,7 +924,7 @@ function App() {
             <div className="admin-footer">
                 <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:'5px', fontSize:'0.85rem'}}>
                     <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
-                    Admin Mode
+                    Admin Mode (For creating new calendar events)
                 </div>
             </div>
         </>
