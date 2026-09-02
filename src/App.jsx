@@ -16,7 +16,7 @@ const Icons = {
   Alert: () => <svg className="icon" style={{color: '#854d0e'}} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>,
   Clock: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>,
   Sync: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>,
-  Flag: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-8a2 2 0 012-2h14a2 2 0 012 2v8l-6-3-6 3-6-3-6 3zM3 21h18M5 5h14a2 2 0 012 2v3a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 01-2-2V7a2 2 0 012-2z" /></svg>
+  Flag: () => <svg className="icon" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 21v-8a2 2 0 012-2h14a2 2 0 012 2v8l-6-3-6 3-6-3-6 3zM3 21h18M5 5h14a2 2 0 012 2v3a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2z" /></svg>
 };
 
 const MAX_DRIVERS = 2; 
@@ -107,7 +107,6 @@ function App() {
 
     let updatedDrivers = currentDrivers.map(d => ({ ...d, passengers: [] }));
     
-    // Ensure "Attending" and "Attending (PLC)" pool together properly for FROM
     const directionConfigs = [
         {
             direction: event.hasPLC ? 'TO_PLC' : 'TO',
@@ -221,6 +220,7 @@ function App() {
     }
   };
 
+  // 1. INITIAL LOAD (Fixed infinite loop by enforcing empty dependency array [])
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
@@ -228,7 +228,6 @@ function App() {
         setDistanceMatrix(data.distanceMatrix);
         setTemplates(data.templates);
         
-        // ONLY resolve user locally on the very first load
         if (!initialLoadDone.current) {
             const savedId = localStorage.getItem('troop16_family_id');
             if (savedId) {
@@ -252,8 +251,10 @@ function App() {
         setLoading(false);
       }
     });
-  }, [autoAssignByDistance]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); 
 
+  // 2. BACKGROUND POLLING
   useEffect(() => {
     const interval = setInterval(() => {
       if (isSavingRef.current || loading) return; 
@@ -281,7 +282,7 @@ function App() {
       });
     }, 15000); 
     return () => clearInterval(interval);
-  }, [events, loading, autoAssignByDistance]);
+  }, [events, loading, autoAssignByDistance]); 
 
   const applyUpdate = () => {
     if (incomingEvents) {
@@ -922,7 +923,7 @@ function App() {
             <div className="admin-footer">
                 <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:'5px', fontSize:'0.85rem'}}>
                     <input type="checkbox" checked={isAdmin} onChange={(e) => setIsAdmin(e.target.checked)} />
-                    Admin Mode (For adding/editing calendar events)
+                    Admin Mode
                 </div>
             </div>
         </>
