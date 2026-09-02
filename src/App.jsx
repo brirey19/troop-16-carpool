@@ -200,7 +200,8 @@ function App() {
   // --- API & POLLING ---
   const fetchEvents = async () => {
     try {
-      const res = await fetch(API_URL);
+      // Append a timestamp to prevent the browser from caching expired Google redirects
+      const res = await fetch(`${API_URL}?t=${new Date().getTime()}`);
       const data = await res.json();
       
       if (Array.isArray(data)) {
