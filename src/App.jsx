@@ -200,7 +200,6 @@ function App() {
   // --- API & POLLING ---
   const fetchEvents = async () => {
     try {
-      // Append a timestamp to prevent the browser from caching expired Google redirects
       const res = await fetch(`${API_URL}?t=${new Date().getTime()}`);
       const data = await res.json();
       
@@ -221,7 +220,7 @@ function App() {
     }
   };
 
-  // 1. INITIAL LOAD (Fixed infinite loop by enforcing empty dependency array [])
+  // 1. INITIAL LOAD 
   useEffect(() => {
     fetchEvents().then(data => {
       if (data) {
@@ -294,43 +293,61 @@ function App() {
     }
   };
 
-  const saveToCloud = (newEvents, newTemplates = templates) => {
+  // *** THE SYNC-BEFORE-SAVE UPGRADE ***
+  // This fetches the live DB instantly before merging a parent's specific click.
+  const updateAndSave = async (eventUpdater, templatesUpdater = (t) => t) => {
     isSavingRef.current = true;
     setSaving(true);
-
-    const processedEvents = newEvents.map(ev => {
-      const isLocked = checkRosterUnlock(ev.date);
-      if (!isLocked) {
-        const calculated = autoAssignByDistance(ev);
-        return { ...calculated, lockedRoster: calculated.drivers };
-      } else {
-        return { ...ev, lockedRoster: ev.drivers };
-      }
-    });
-
-    const validEvents = processedEvents
-      .filter(e => e.id && String(e.id).trim() !== "")
-      .map(e => ({ ...e, id: String(e.id) }));
-
-    const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
     
-    setEvents(sortedEvents); 
-    setTemplates(newTemplates);
-    setUpdateAvailable(false);
-    
-    const payload = { events: sortedEvents, templates: newTemplates };
-    
-    fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(payload) })
-    .then(() => {
-      isSavingRef.current = false;
-      setSaving(false);
-    })
-    .catch(() => { 
-      alert("Error saving"); 
-      isSavingRef.current = false;
-      setSaving(false); 
-    });
+    try {
+        // 1. Fetch the absolute latest snapshot from the cloud
+        const cloudData = await fetchEvents();
+        const freshEvents = cloudData ? cloudData.events : events;
+        const freshTemplates = cloudData ? cloudData.templates : templates;
+        const currentUsers = cloudData ? cloudData.users : users;
+        const currentDistMat = cloudData ? cloudData.distanceMatrix : distanceMatrix;
+
+        // 2. Apply this parent's specific UI click to the fresh snapshot
+        const modifiedEvents = eventUpdater(freshEvents);
+        const modifiedTemplates = templatesUpdater(freshTemplates);
+
+        // 3. Run the geographic logic to ensure the roster saves correctly
+        const processedEvents = modifiedEvents.map(ev => {
+            const isLocked = checkRosterUnlock(ev.date);
+            if (!isLocked) {
+                const calculated = autoAssignByDistance(ev, currentUsers, currentDistMat);
+                return { ...calculated, lockedRoster: calculated.drivers };
+            } else {
+                return { ...ev, lockedRoster: ev.drivers };
+            }
+        });
+
+        const validEvents = processedEvents
+            .filter(e => e.id && String(e.id).trim() !== "")
+            .map(e => ({ ...e, id: String(e.id) }));
+
+        const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
+        
+        // 4. Update the local React UI instantly
+        setEvents(sortedEvents); 
+        setTemplates(modifiedTemplates);
+        setUpdateAvailable(false);
+        setIncomingEvents(null);
+        setDiffReport([]);
+        
+        // 5. Fire the merged payload back to the database
+        const payload = { events: sortedEvents, templates: modifiedTemplates };
+        await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(payload) });
+        
+    } catch (err) {
+        alert("Error saving your data. Please check your connection.");
+        console.error(err);
+    } finally {
+        isSavingRef.current = false;
+        setSaving(false);
+    }
   };
+
 
   // --- TEMPLATE HANDLERS ---
   const handleTemplateSelect = (e) => {
@@ -366,8 +383,8 @@ function App() {
         hasPLC: newEventHasPLC
     };
     
-    const updatedTemplates = [...templates, newTemplate];
-    saveToCloud(events, updatedTemplates);
+    // Safely merges template
+    updateAndSave((evts) => evts, (tmpls) => [...tmpls, newTemplate]);
     setSelectedTemplateId(newTemplate.id);
     alert(`Template "${tName}" saved successfully!`);
   };
@@ -382,30 +399,35 @@ function App() {
     if (!currentUser) return; 
     const newSeats = parseInt(val);
     setSeatConfig({ ...seatConfig, [eventId]: newSeats });
-    const newEvents = events.map(event => {
+    
+    updateAndSave((evts) => evts.map(event => {
         if (event.id !== eventId) return event;
         const updatedDrivers = event.drivers.map(d => d.userId === currentUser.id ? { ...d, seats: newSeats } : d);
         return { ...event, drivers: updatedDrivers };
-    });
-    saveToCloud(newEvents);
+    }));
   };
 
   const handleAddEvent = () => {
     if (!newEventTitle || !newEventDate) return alert("Please fill in title and date");
     const newEvent = { id: generateId(), title: newEventTitle, date: newEventDate, location: newEventLocation, hasPLC: newEventHasPLC, attendees: [], drivers: [] };
-    saveToCloud([...events, newEvent]);
+    
+    updateAndSave((evts) => [...evts, newEvent]);
     setSelectedTemplateId("");
     setNewEventTitle(''); setNewEventDate(''); setNewEventLocation(''); setNewEventHasPLC(false);
   };
+  
   const handleDeleteEvent = (eventId) => {
-    if (window.confirm("Delete event?")) saveToCloud(events.filter(e => e.id !== eventId));
+    if (window.confirm("Delete event?")) updateAndSave((evts) => evts.filter(e => e.id !== eventId));
   };
+  
   const handleEditEvent = (eventId, field, value) => {
-    saveToCloud(events.map(e => e.id === eventId ? { ...e, [field]: value } : e)); 
+    updateAndSave((evts) => evts.map(e => e.id === eventId ? { ...e, [field]: value } : e)); 
   };
+  
   const toggleAttendance = (eventId, newStatus) => {
     if (!currentUser) return; 
-    const newEvents = events.map(event => {
+    
+    updateAndSave((evts) => evts.map(event => {
       if (event.id !== eventId) return event;
       let updatedAttendees = [...event.attendees].filter(a => (a.id || a) !== currentUser.id);
       if (newStatus) updatedAttendees.push({ id: currentUser.id, status: newStatus });
@@ -414,25 +436,23 @@ function App() {
       if (isLocked) {
         return { ...event, attendees: updatedAttendees };
       }
-      return autoAssignByDistance({ ...event, attendees: updatedAttendees });
-    });
-    saveToCloud(newEvents);
+      return autoAssignByDistance({ ...event, attendees: updatedAttendees }, users, distanceMatrix);
+    }));
   };
 
   const toggleDriving = (eventId, direction) => {
     if (!currentUser) return; 
-    const newEvents = events.map(event => {
+    
+    updateAndSave((evts) => evts.map(event => {
       if (event.id !== eventId) return event;
       
       const isLocked = checkRosterUnlock(event.date);
       let updatedDrivers = [...event.drivers];
-      
       const alreadyDriving = updatedDrivers.find(d => d.userId === currentUser.id && d.direction === direction);
 
       if (alreadyDriving) {
         updatedDrivers = updatedDrivers.filter(d => d !== alreadyDriving);
       } else {
-        // Driver Caps
         if (direction === 'TO_PLC' && updatedDrivers.filter(d => d.direction === 'TO_PLC').length >= 1) return event;
         if (direction === 'TO_REGULAR' && updatedDrivers.filter(d => d.direction === 'TO_REGULAR').length >= 1) return event;
         if (direction === 'TO' && updatedDrivers.filter(d => d.direction === 'TO').length >= MAX_DRIVERS) return event;
@@ -448,11 +468,9 @@ function App() {
 
         if (isLocked) {
             const existingDrivers = updatedDrivers.filter(d => d.direction === direction);
-            
             if (existingDrivers.length === 0) {
                 updatedDrivers.push(newDriver);
-                const intermediate = { ...event, drivers: updatedDrivers };
-                return autoAssignByDistance(intermediate);
+                return autoAssignByDistance({ ...event, drivers: updatedDrivers }, users, distanceMatrix);
             } else {
                 const ownKid = users.find(u => u.id === currentUser.id);
                 updatedDrivers.forEach(d => {
@@ -483,13 +501,11 @@ function App() {
                 });
 
                 let capacity = newDriver.seats;
-
                 orphans.forEach(orphan => {
                     if (newDriver.passengers.length < capacity) {
                         newDriver.passengers.push(orphan.kidName);
                     }
                 });
-
                 updatedDrivers.push(newDriver);
             }
         } else {
@@ -499,20 +515,18 @@ function App() {
 
       const resultEvent = { ...event, drivers: updatedDrivers };
       if (!isLocked) {
-          return autoAssignByDistance(resultEvent);
+          return autoAssignByDistance(resultEvent, users, distanceMatrix);
       }
       return resultEvent;
-    });
-    saveToCloud(newEvents);
+    }));
   };
 
   const cancelAllDrives = (eventId) => {
     if (!currentUser) return; 
-    const newEvents = events.map(event => {
+    updateAndSave((evts) => evts.map(event => {
         if (event.id !== eventId) return event;
         return { ...event, drivers: event.drivers.filter(d => d.userId !== currentUser.id) };
-    });
-    saveToCloud(newEvents);
+    }));
   };
 
   // --- UI COMPONENTS ---
