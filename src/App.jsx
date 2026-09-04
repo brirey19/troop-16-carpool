@@ -83,6 +83,7 @@ function App() {
   const [saving, setSaving] = useState(false);
   const isSavingRef = useRef(false);
   const initialLoadDone = useRef(false);
+  const saveQueueRef = useRef(Promise.resolve());
 
   const [incomingEvents, setIncomingEvents] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -292,59 +293,74 @@ function App() {
     }
   };
 
-  // *** THE SYNC-BEFORE-SAVE UPGRADE ***
-  // This fetches the live DB instantly before merging a parent's specific click.
-  const updateAndSave = async (eventUpdater, templatesUpdater = (t) => t) => {
-    isSavingRef.current = true;
-    setSaving(true);
-    
-    try {
-        // 1. Fetch the absolute latest snapshot from the cloud
-        const cloudData = await fetchEvents();
-        const freshEvents = cloudData ? cloudData.events : events;
-        const freshTemplates = cloudData ? cloudData.templates : templates;
-        const currentUsers = cloudData ? cloudData.users : users;
-        const currentDistMat = cloudData ? cloudData.distanceMatrix : distanceMatrix;
-
-        // 2. Apply this parent's specific UI click to the fresh snapshot
-        const modifiedEvents = eventUpdater(freshEvents);
-        const modifiedTemplates = templatesUpdater(freshTemplates);
-
-        // 3. Run the geographic logic to ensure the roster saves correctly
-        const processedEvents = modifiedEvents.map(ev => {
+// *** THE SYNC-BEFORE-SAVE UPGRADE (WITH PROMISE QUEUE & OPTIMISTIC UI) ***
+  const updateAndSave = (eventUpdater, templatesUpdater = (t) => t) => {
+    // 1. OPTIMISTIC UPDATE: Instantly change the screen!
+    setEvents(prevEvents => {
+        const optimisticEvents = eventUpdater(prevEvents);
+        return optimisticEvents.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
             if (!isLocked) {
-                const calculated = autoAssignByDistance(ev, currentUsers, currentDistMat);
+                const calculated = autoAssignByDistance(ev, users, distanceMatrix);
                 return { ...calculated, lockedRoster: calculated.drivers };
-            } else {
-                return { ...ev, lockedRoster: ev.drivers };
             }
+            return { ...ev, lockedRoster: ev.drivers };
         });
+    });
+    setTemplates(prevTemplates => templatesUpdater(prevTemplates));
+    
+    setSaving(true);
 
-        const validEvents = processedEvents
-            .filter(e => e.id && String(e.id).trim() !== "")
-            .map(e => ({ ...e, id: String(e.id) }));
+    // 2. QUEUE THE BACKGROUND SAVES (So rapid clicks form a single-file line)
+    saveQueueRef.current = saveQueueRef.current.then(async () => {
+        isSavingRef.current = true;
+        try {
+            // Fetch live snapshot silently
+            const cloudData = await fetchEvents();
+            const freshEvents = cloudData ? cloudData.events : events;
+            const freshTemplates = cloudData ? cloudData.templates : templates;
+            const currentUsers = cloudData ? cloudData.users : users;
+            const currentDistMat = cloudData ? cloudData.distanceMatrix : distanceMatrix;
 
-        const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
-        
-        // 4. Update the local React UI instantly
-        setEvents(sortedEvents); 
-        setTemplates(modifiedTemplates);
-        setUpdateAvailable(false);
-        setIncomingEvents(null);
-        setDiffReport([]);
-        
-        // 5. Fire the merged payload back to the database
-        const payload = { events: sortedEvents, templates: modifiedTemplates };
-        await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(payload) });
-        
-    } catch (err) {
-        alert("Error saving your data. Please check your connection.");
-        console.error(err);
-    } finally {
-        isSavingRef.current = false;
-        setSaving(false);
-    }
+            // Apply this specific update to the fresh data
+            const modifiedEvents = eventUpdater(freshEvents);
+            const modifiedTemplates = templatesUpdater(freshTemplates);
+
+            const processedEvents = modifiedEvents.map(ev => {
+                const isLocked = checkRosterUnlock(ev.date);
+                if (!isLocked) {
+                    const calculated = autoAssignByDistance(ev, currentUsers, currentDistMat);
+                    return { ...calculated, lockedRoster: calculated.drivers };
+                } else {
+                    return { ...ev, lockedRoster: ev.drivers };
+                }
+            });
+
+            const validEvents = processedEvents
+                .filter(e => e.id && String(e.id).trim() !== "")
+                .map(e => ({ ...e, id: String(e.id) }));
+
+            const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
+            
+            // Push to Google
+            const payload = { events: sortedEvents, templates: modifiedTemplates };
+            await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(payload) });
+            
+            // Finalize UI silently
+            setEvents(sortedEvents); 
+            setTemplates(modifiedTemplates);
+            setUpdateAvailable(false);
+            setIncomingEvents(null);
+            setDiffReport([]);
+            
+        } catch (err) {
+            console.error("Save error:", err);
+        } finally {
+            isSavingRef.current = false;
+            // Turn off the "Saving..." text once the queue is finished
+            setTimeout(() => setSaving(false), 500); 
+        }
+    });
   };
 
 
