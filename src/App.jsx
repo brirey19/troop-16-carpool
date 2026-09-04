@@ -274,10 +274,9 @@ function App() {
         });
         const report = generateDiffReport(events, hydratedNewData);
         if (report.length > 0) {
-          console.log("Detected Changes:", report);
-          setDiffReport(report); 
-          setIncomingEvents(hydratedNewData);
-          setUpdateAvailable(true);
+          console.log("Detected Changes. Auto-updating screen:", report);
+          setEvents(hydratedNewData); 
+          // We don't trigger the button anymore!
         }
       });
     }, 15000); 
