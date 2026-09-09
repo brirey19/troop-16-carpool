@@ -84,6 +84,7 @@ function App() {
   const isSavingRef = useRef(false);
   const initialLoadDone = useRef(false);
   const saveQueueRef = useRef(Promise.resolve());
+  const queuedSavesRef = useRef(0);
 
   const [incomingEvents, setIncomingEvents] = useState(null);
   const [updateAvailable, setUpdateAvailable] = useState(false);
@@ -255,12 +256,16 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); 
 
-  // 2. BACKGROUND POLLING
+  /// 2. BACKGROUND POLLING
   useEffect(() => {
     const interval = setInterval(() => {
-      if (isSavingRef.current || loading) return; 
+      // If there are any saves in the queue, skip this polling cycle entirely
+      if (queuedSavesRef.current > 0 || loading) return; 
+      
       fetchEvents().then(newData => {
-        if (!newData || isSavingRef.current) return;
+        // Double check: Did the user click a button WHILE we were downloading this?
+        // If yes, discard this polled data immediately so we don't overwrite their optimistic UI.
+        if (!newData || queuedSavesRef.current > 0) return;
         
         setTemplates(newData.templates);
         setUsers(newData.users);
@@ -277,12 +282,11 @@ function App() {
         if (report.length > 0) {
           console.log("Detected Changes. Auto-updating screen:", report);
           setEvents(hydratedNewData); 
-          // We don't trigger the button anymore!
         }
       });
     }, 15000); 
     return () => clearInterval(interval);
-  }, [events, loading, autoAssignByDistance]); 
+  }, [events, loading, autoAssignByDistance]);
 
   // 3. TAB CLOSE PROTECTION
   // Warns the user if they try to close the app while background saves are still queued
@@ -309,7 +313,11 @@ function App() {
 
 // *** THE SYNC-BEFORE-SAVE UPGRADE (WITH PROMISE QUEUE & OPTIMISTIC UI) ***
   const updateAndSave = (eventUpdater, templatesUpdater = (t) => t) => {
-    // 1. OPTIMISTIC UPDATE: Instantly change the screen!
+    
+    // 1. Instantly register that a save is happening to block background polling
+    queuedSavesRef.current += 1;
+    
+    // 2. OPTIMISTIC UPDATE: Instantly change the screen!
     setEvents(prevEvents => {
         const optimisticEvents = eventUpdater(prevEvents);
         return optimisticEvents.map(ev => {
@@ -325,18 +333,16 @@ function App() {
     
     setSaving(true);
 
-    // 2. QUEUE THE BACKGROUND SAVES (So rapid clicks form a single-file line)
+    // 3. QUEUE THE BACKGROUND SAVES
     saveQueueRef.current = saveQueueRef.current.then(async () => {
         isSavingRef.current = true;
         try {
-            // Fetch live snapshot silently
             const cloudData = await fetchEvents();
             const freshEvents = cloudData ? cloudData.events : events;
             const freshTemplates = cloudData ? cloudData.templates : templates;
             const currentUsers = cloudData ? cloudData.users : users;
             const currentDistMat = cloudData ? cloudData.distanceMatrix : distanceMatrix;
 
-            // Apply this specific update to the fresh data
             const modifiedEvents = eventUpdater(freshEvents);
             const modifiedTemplates = templatesUpdater(freshTemplates);
 
@@ -356,11 +362,9 @@ function App() {
 
             const sortedEvents = [...validEvents].sort((a, b) => new Date(a.date) - new Date(b.date));
             
-            // Push to Google
             const payload = { events: sortedEvents, templates: modifiedTemplates };
             await fetch(API_URL, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(payload) });
             
-            // Finalize UI silently
             setEvents(sortedEvents); 
             setTemplates(modifiedTemplates);
             setUpdateAvailable(false);
@@ -371,8 +375,13 @@ function App() {
             console.error("Save error:", err);
         } finally {
             isSavingRef.current = false;
-            // Turn off the "Saving..." text once the queue is finished
-            setTimeout(() => setSaving(false), 500); 
+            // Subtract 1 from the queue now that this save is done
+            queuedSavesRef.current -= 1;
+            
+            // If the queue is entirely empty, turn off the saving badge
+            if (queuedSavesRef.current === 0) {
+                setTimeout(() => setSaving(false), 500); 
+            }
         }
     });
   };
