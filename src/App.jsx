@@ -284,6 +284,20 @@ function App() {
     return () => clearInterval(interval);
   }, [events, loading, autoAssignByDistance]); 
 
+  // 3. TAB CLOSE PROTECTION
+  // Warns the user if they try to close the app while background saves are still queued
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (isSavingRef.current) {
+        e.preventDefault();
+        e.returnValue = ''; // This tells the browser to show the default warning prompt
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
+
   const applyUpdate = () => {
     if (incomingEvents) {
       setEvents(incomingEvents);
@@ -564,7 +578,22 @@ function App() {
       <header className="top-app-bar">
         <h1>Troop 16 Scout Carpool</h1>
         <div style={{display:'flex', alignItems:'center', gap:'10px'}}>
-            {saving && <span style={{fontSize:'0.8rem', color:'#666'}}><Icons.Sync /> Saving...</span>}
+            {saving && (
+              <span style={{
+                fontSize: '0.8rem',
+                fontWeight: '600',
+                color: '#92400e',
+                backgroundColor: '#fef3c7',
+                border: '1px solid #fcd34d',
+                padding: '3px 8px',
+                borderRadius: '12px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}>
+                <Icons.Sync /> Saving changes...Don't close browser
+              </span>
+            )}
             {updateAvailable && <button className="update-btn" onClick={applyUpdate}><Icons.Sync /> Other users have made updates</button>}
         </div>
       </header>
