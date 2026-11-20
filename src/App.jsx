@@ -244,7 +244,7 @@ function App() {
 
         const hydrated = data.events.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
-            if (isLocked && ev.lockedRoster) {
+            if (isLocked && Array.isArray(ev.lockedRoster) && ev.lockedRoster.length > 0) {
                 return { ...ev, drivers: ev.lockedRoster };
             }
             return autoAssignByDistance(ev, data.users, data.distanceMatrix);
@@ -273,7 +273,7 @@ function App() {
 
         const hydratedNewData = newData.events.map(ev => {
             const isLocked = checkRosterUnlock(ev.date);
-            if (isLocked && ev.lockedRoster) {
+            if (isLocked && Array.isArray(ev.lockedRoster) && ev.lockedRoster.length > 0) {
                 return { ...ev, drivers: ev.lockedRoster };
             }
             return autoAssignByDistance(ev, newData.users, newData.distanceMatrix);
@@ -711,8 +711,9 @@ function App() {
                 
                 const isRosterUnlocked = checkRosterUnlock(event.date);
                 const isRosterVisible = isRosterUnlocked || isAdmin;
+                const hasLockedRoster = Array.isArray(event.lockedRoster) && event.lockedRoster.length > 0;
 
-                const rosterEvent = (isRosterUnlocked && event.lockedRoster) 
+                const rosterEvent = (isRosterUnlocked && hasLockedRoster) 
                     ? { ...event, drivers: event.lockedRoster } 
                     : autoAssignByDistance(event);
 
@@ -940,7 +941,7 @@ function App() {
                                 </div>
                             ) : (
                                 <>
-                                    {isRosterUnlocked && event.lockedRoster && (
+                                    {isRosterUnlocked && hasLockedRoster && (
                                       <div style={{backgroundColor:'#fef2f2', color:'#991b1b', fontSize:'0.8rem', padding:'8px', borderRadius:'6px', marginBottom:'10px', textAlign:'center'}}>
                                         <strong>Roster Locked:</strong> Changes made now will not update the list below.
                                       </div>
